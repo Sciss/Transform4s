@@ -1,32 +1,23 @@
-JTransforms
-============
+# Transform4s
 
-JTransforms is the first, open source, multithreaded FFT library written in pure Java. 
-Currently, four types of transforms are available: Discrete Fourier Transform (DFT), 
-Discrete Cosine Transform (DCT), Discrete Sine Transform (DST) and Discrete Hartley Transform (DHT).
-The code is derived from General Purpose FFT Package written by Takuya Ooura and 
-from Java FFTPack written by Baoshe Zhang. 
+[![Build Status](https://travis-ci.org/Sciss/Transform4s.svg?branch=main)](https://travis-ci.org/Sciss/Transform4s)
+[![Maven Central](https://maven-badges.herokuapp.com/maven-central/de.sciss/transform4s_2.13/badge.svg)](https://maven-badges.herokuapp.com/maven-central/de.sciss/transform4s_2.13)
 
-### JTransforms 3.1
+## statement
 
-[JTransforms-3.1-with-dependencies.jar](http://search.maven.org/remotecontent?filepath=com/github/wendykierp/JTransforms/3.1/JTransforms-3.1-with-dependencies.jar) 
+This is a library for FFT based transformations. It is a direct translation from Java to Scala of parts
+of the [JTransforms](https://github.com/wendykierp/JTransforms) library (C)opyright by Piotr Wendykier. 
+All adaptations and Scala translation (C)opyright 2020 by Hanns Holger Ruz. This project is released
+under the GNU Lesser General Public License v2.1+.
 
-[JTransforms-3.1-javadoc.jar](http://search.maven.org/remotecontent?filepath=com/github/wendykierp/JTransforms/3.1/JTransforms-3.1-javadoc.jar) 
+## building
 
-[JTransforms-3.1-sources.jar](http://search.maven.org/remotecontent?filepath=com/github/wendykierp/JTransforms/3.1/JTransforms-3.1-sources.jar) 
+This project builds with sbt against Scala 2.13, 2.12, Dotty (JVM) and 2.13 (Scala.js).
 
-JTransforms is available on maven central as
+## linking
 
-        <dependency>
-            <groupId>com.github.wendykierp</groupId>
-            <artifactId>JTransforms</artifactId>
-            <version>3.1</version>
-            <classifier>with-dependencies</classifier>
-        </dependency>
+The following artifact is necessary as dependency:
 
-## Benchmarks
+    libraryDependencies += "de.sciss" %% "transform4s" % v
 
-Benchmarks are available at [JTransforms website](http://sites.google.com/site/piotrwendykier/software/jtransforms).
-
-##  JavaDoc
-The documentation is available at [apidocs](http://wendykierp.github.io/JTransforms/apidocs/).
+The current version `v` is `"9.1.0"`
