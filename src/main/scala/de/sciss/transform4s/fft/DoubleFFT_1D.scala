@@ -30,9 +30,11 @@ package de.sciss.transform4s.fft
 import java.util.concurrent.{ExecutionException, Future}
 import java.util.logging.{Level, Logger}
 
-import org.apache.commons.math3.util.FastMath._
-import org.jtransforms.utils.CommonUtils
-import pl.edu.icm.jlargearrays.ConcurrencyUtils
+import de.sciss.transform4s.utils.ConcurrencyUtils
+//import org.apache.commons.math3.util.FastMath._
+import de.sciss.transform4s.utils.CommonUtils
+
+import Math.{sin, cos, ceil, log}
 
 /**
  * Computes 1D Discrete Fourier Transform (DFT) of complex and real, double
@@ -1020,8 +1022,8 @@ final class DoubleFFT_1D private (
         k -= 2 * n
       }
       arg = pi_n * k
-      bk1(2 * i) = cos(arg)
-      bk1(2 * i + 1) = sin(arg)
+      bk1(2 * i     ) = cos(arg)
+      bk1(2 * i + 1 ) = sin(arg)
     }
     val scale: Double = 1.0 / nBluestein
     bk2(0) = bk1(0) * scale
@@ -1773,45 +1775,43 @@ final class DoubleFFT_1D private (
   private[fft] def rfftf(a: Array[Double], offa: Int): Unit = {
     if (n == 1) return
 
+    val ch    = new Array[Double](n)
+    val twon  = 2 * n
+    val nf    = wtable_r(1 + twon).toInt
+
     var l1    = 0
-    var l2    = 0
-    var na    = 0
+    var l2    = n
+    var na    = 1
     var kh    = 0
-    var nf    = 0
     var ipll  = 0
-    var iw    = 0
+    var iw    = twon - 1
     var ido   = 0
     var idl1  = 0
-    val ch = new Array[Double](n)
-    val twon = 2 * n
-    nf = wtable_r(1 + twon).toInt
-    na = 1
-    l2 = n
-    iw = twon - 1
+
     for (k1 <- 1 to nf) {
-      kh = nf - k1
-      ipll = wtable_r(kh + 2 + twon).toInt
-      l1 = l2 / ipll
-      ido = n / l2
-      idl1 = ido * l1
-      iw -= (ipll - 1) * ido
-      na = 1 - na
+      kh    = nf - k1
+      ipll  = wtable_r(kh + 2 + twon).toInt
+      l1    = l2 / ipll
+      ido   = n / l2
+      idl1  = ido * l1
+      iw   -= (ipll - 1) * ido
+      na    = 1 - na
       ipll match {
         case 2 =>
-          if (na == 0) radf2(ido, l1, a, offa, ch, 0, iw)
-          else radf2(ido, l1, ch, 0, a, offa, iw)
+          if (na == 0)  radf2(ido, l1, a, offa, ch, 0, iw)
+          else          radf2(ido, l1, ch, 0, a, offa, iw)
 
         case 3 =>
-          if (na == 0) radf3(ido, l1, a, offa, ch, 0, iw)
-          else radf3(ido, l1, ch, 0, a, offa, iw)
+          if (na == 0)  radf3(ido, l1, a, offa, ch, 0, iw)
+          else          radf3(ido, l1, ch, 0, a, offa, iw)
 
         case 4 =>
-          if (na == 0) radf4(ido, l1, a, offa, ch, 0, iw)
-          else radf4(ido, l1, ch, 0, a, offa, iw)
+          if (na == 0)  radf4(ido, l1, a, offa, ch, 0, iw)
+          else          radf4(ido, l1, ch, 0, a, offa, iw)
 
         case 5 =>
-          if (na == 0) radf5(ido, l1, a, offa, ch, 0, iw)
-          else radf5(ido, l1, ch, 0, a, offa, iw)
+          if (na == 0)  radf5(ido, l1, a, offa, ch, 0, iw)
+          else          radf5(ido, l1, ch, 0, a, offa, iw)
 
         case _ =>
           if (ido == 1) na = 1 - na
@@ -2876,33 +2876,30 @@ final class DoubleFFT_1D private (
    radfg: Real FFT's forward processing of general factor
    --------------------------------------------------------*/
   private[fft] def radfg(ido: Int, ip: Int, l1: Int, idl1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
-    var idij = 0
-    var ipph = 0
-    var j2 = 0
-    var ic = 0
-    var jc = 0
-    var lc = 0
-    var is = 0
-    var nbd = 0
-    var dc2 = .0
-    var ai1 = .0
-    var ai2 = .0
-    var ar1 = .0
-    var ar2 = .0
-    var ds2 = .0
-    var dcp = .0
-    var arg = .0
-    var dsp = .0
-    var ar1h = .0
-    var ar2h = .0
-    var w1r = .0
-    var w1i = .0
-    val iw1 = offset
-    arg = TWO_PI / ip.toDouble
-    dcp = cos(arg)
-    dsp = sin(arg)
-    ipph = (ip + 1) / 2
-    nbd = (ido - 1) / 2
+    var idij  = 0
+    var j2    = 0
+    var ic    = 0
+    var jc    = 0
+    var lc    = 0
+    var is    = 0
+    var dc2   = 0.0
+    var ai1   = 0.0
+    var ai2   = 0.0
+    var ar1   = 0.0
+    var ar2   = 0.0
+    var ds2   = 0.0
+    var ar1h  = 0.0
+    var ar2h  = 0.0
+    var w1r   = 0.0
+    var w1i   = 0.0
+
+    val arg   = TWO_PI / ip.toDouble
+    val dcp   = cos(arg)
+    val dsp   = sin(arg)
+    val iw1   = offset
+    val ipph  = (ip   + 1) / 2
+    val nbd   = (ido  - 1) / 2
+
     if (ido != 1) {
       for (ik <- 0 until idl1) {
         out(out_off + ik) = in(in_off + ik)
@@ -2921,9 +2918,7 @@ final class DoubleFFT_1D private (
           idij = is - 1
           val idx1 = j * l1 * ido
           var i = 2
-          while ( {
-            i < ido
-          }) {
+          while (i < ido) {
             idij += 2
             val idx2 = idij + iw1
             val idx4 = in_off + i
@@ -2931,13 +2926,13 @@ final class DoubleFFT_1D private (
             w1r = wtable_r(idx2 - 1)
             w1i = wtable_r(idx2)
             for (k <- 0 until l1) {
-              val idx3 = k * ido + idx1
+              val idx3  = k * ido + idx1
               val oidx1 = idx5 + idx3
               val iidx1 = idx4 + idx3
-              val i1i = in(iidx1 - 1)
-              val i1r = in(iidx1)
-              out(oidx1 - 1) = w1r * i1i + w1i * i1r
-              out(oidx1) = w1r * i1r - w1i * i1i
+              val i1i   = in(iidx1 - 1)
+              val i1r   = in(iidx1)
+              out(oidx1 - 1 ) = w1r * i1i + w1i * i1r
+              out(oidx1     ) = w1r * i1r - w1i * i1i
             }
 
             i += 2
@@ -2953,19 +2948,17 @@ final class DoubleFFT_1D private (
             idij = is - 1
             val idx3 = k * ido + idx1
             var i = 2
-            while ( {
-              i < ido
-            }) {
+            while (i < ido) {
               idij += 2
-              val idx2 = idij + iw1
-              w1r = wtable_r(idx2 - 1)
-              w1i = wtable_r(idx2)
+              val idx2  = idij + iw1
+              w1r       = wtable_r(idx2 - 1)
+              w1i       = wtable_r(idx2)
               val oidx1 = out_off + i + idx3
               val iidx1 = in_off + i + idx3
-              val i1i = in(iidx1 - 1)
-              val i1r = in(iidx1)
-              out(oidx1 - 1) = w1r * i1i + w1i * i1r
-              out(oidx1) = w1r * i1r - w1i * i1i
+              val i1i   = in(iidx1 - 1)
+              val i1r   = in(iidx1)
+              out(oidx1 - 1 ) = w1r * i1i + w1i * i1r
+              out(oidx1     ) = w1r * i1r - w1i * i1i
 
               i += 2
             }
@@ -2980,23 +2973,21 @@ final class DoubleFFT_1D private (
           val idx3 = k * ido + idx1
           val idx4 = k * ido + idx2
           var i = 2
-          while ( {
-            i < ido
-          }) {
-            val idx5 = in_off + i
-            val idx6 = out_off + i
+          while (i < ido) {
+            val idx5  = in_off + i
+            val idx6  = out_off + i
             val iidx1 = idx5 + idx3
             val iidx2 = idx5 + idx4
             val oidx1 = idx6 + idx3
             val oidx2 = idx6 + idx4
-            val o1i = out(oidx1 - 1)
-            val o1r = out(oidx1)
-            val o2i = out(oidx2 - 1)
-            val o2r = out(oidx2)
+            val o1i   = out(oidx1 - 1)
+            val o1r   = out(oidx1)
+            val o2i   = out(oidx2 - 1)
+            val o2r   = out(oidx2)
             in(iidx1 - 1) = o1i + o2i
-            in(iidx1) = o1r + o2r
+            in(iidx1    ) = o1r + o2r
             in(iidx2 - 1) = o1r - o2r
-            in(iidx2) = o2i - o1i
+            in(iidx2    ) = o2i - o1i
 
             i += 2
           }
@@ -3007,26 +2998,24 @@ final class DoubleFFT_1D private (
         val idx1 = j * l1 * ido
         val idx2 = jc * l1 * ido
         var i = 2
-        while ( {
-          i < ido
-        }) {
+        while (i < ido) {
           val idx5 = in_off + i
           val idx6 = out_off + i
           for (k <- 0 until l1) {
-            val idx3 = k * ido + idx1
-            val idx4 = k * ido + idx2
+            val idx3  = k * ido + idx1
+            val idx4  = k * ido + idx2
             val iidx1 = idx5 + idx3
             val iidx2 = idx5 + idx4
             val oidx1 = idx6 + idx3
             val oidx2 = idx6 + idx4
-            val o1i = out(oidx1 - 1)
-            val o1r = out(oidx1)
-            val o2i = out(oidx2 - 1)
-            val o2r = out(oidx2)
+            val o1i   = out(oidx1 - 1)
+            val o1r   = out(oidx1)
+            val o2i   = out(oidx2 - 1)
+            val o2r   = out(oidx2)
             in(iidx1 - 1) = o1i + o2i
-            in(iidx1) = o1r + o2r
+            in(iidx1    ) = o1r + o2r
             in(iidx2 - 1) = o1r - o2r
-            in(iidx2) = o2i - o1i
+            in(iidx2    ) = o2i - o1i
           }
 
           i += 2
@@ -3039,12 +3028,12 @@ final class DoubleFFT_1D private (
       val idx1 = j * l1 * ido
       val idx2 = jc * l1 * ido
       for (k <- 0 until l1) {
-        val idx3 = k * ido + idx1
-        val idx4 = k * ido + idx2
+        val idx3  = k * ido + idx1
+        val idx4  = k * ido + idx2
         val oidx1 = out_off + idx3
         val oidx2 = out_off + idx4
-        val o1r = out(oidx1)
-        val o2r = out(oidx2)
+        val o1r   = out(oidx1)
+        val o2r   = out(oidx2)
         in(in_off + idx3) = o1r + o2r
         in(in_off + idx4) = o2r - o1r
       }
@@ -3053,10 +3042,10 @@ final class DoubleFFT_1D private (
     ai1 = 0
     val idx0 = (ip - 1) * idl1
     for (l <- 1 until ipph) {
-      lc = ip - l
-      ar1h = dcp * ar1 - dsp * ai1
-      ai1 = dcp * ai1 + dsp * ar1
-      ar1 = ar1h
+      lc    = ip - l
+      ar1h  = dcp * ar1 - dsp * ai1
+      ai1   = dcp * ai1 + dsp * ar1
+      ar1   = ar1h
       val idx1 = l * idl1
       val idx2 = lc * idl1
       for (ik <- 0 until idl1) {
@@ -3070,10 +3059,10 @@ final class DoubleFFT_1D private (
       ar2 = ar1
       ai2 = ai1
       for (j <- 2 until ipph) {
-        jc = ip - j
-        ar2h = dc2 * ar2 - ds2 * ai2
-        ai2 = dc2 * ai2 + ds2 * ar2
-        ar2 = ar2h
+        jc    = ip - j
+        ar2h  = dc2 * ar2 - ds2 * ai2
+        ai2   = dc2 * ai2 + ds2 * ar2
+        ar2   = ar2h
         val idx3 = j * idl1
         val idx4 = jc * idl1
         for (ik <- 0 until idl1) {
@@ -3130,25 +3119,23 @@ final class DoubleFFT_1D private (
         val idx4 = k * idx01
         val idx5 = k * ido
         var i = 2
-        while ( {
-          i < ido
-        }) {
+        while (i < ido) {
           ic = ido - i
-          val idx6 = in_off + i
-          val idx7 = in_off + ic
-          val idx8 = out_off + i
+          val idx6  = in_off + i
+          val idx7  = in_off + ic
+          val idx8  = out_off + i
           val iidx1 = idx6 + idx3 + idx4
           val iidx2 = idx7 + idx3 - ido + idx4
           val oidx1 = idx8 + idx5 + idx1
           val oidx2 = idx8 + idx5 + idx2
-          val o1i = out(oidx1 - 1)
-          val o1r = out(oidx1)
-          val o2i = out(oidx2 - 1)
-          val o2r = out(oidx2)
+          val o1i   = out(oidx1 - 1)
+          val o1r   = out(oidx1)
+          val o2i   = out(oidx2 - 1)
+          val o2r   = out(oidx2)
           in(iidx1 - 1) = o1i + o2i
           in(iidx2 - 1) = o1i - o2i
-          in(iidx1) = o1r + o2r
-          in(iidx2) = o2r - o1r
+          in(iidx1    ) = o1r + o2r
+          in(iidx2    ) = o2r - o1r
 
           i += 2
         }
@@ -3161,28 +3148,26 @@ final class DoubleFFT_1D private (
       val idx2 = jc * l1 * ido
       val idx3 = j2 * ido
       var i = 2
-      while ( {
-        i < ido
-      }) {
+      while (i < ido) {
         ic = ido - i
         val idx6 = in_off + i
         val idx7 = in_off + ic
         val idx8 = out_off + i
         for (k <- 0 until l1) {
-          val idx4 = k * idx01
-          val idx5 = k * ido
+          val idx4  = k * idx01
+          val idx5  = k * ido
           val iidx1 = idx6 + idx3 + idx4
           val iidx2 = idx7 + idx3 - ido + idx4
           val oidx1 = idx8 + idx5 + idx1
           val oidx2 = idx8 + idx5 + idx2
-          val o1i = out(oidx1 - 1)
-          val o1r = out(oidx1)
-          val o2i = out(oidx2 - 1)
-          val o2r = out(oidx2)
+          val o1i   = out(oidx1 - 1)
+          val o1r   = out(oidx1)
+          val o2i   = out(oidx2 - 1)
+          val o2r   = out(oidx2)
           in(iidx1 - 1) = o1i + o2i
           in(iidx2 - 1) = o1i - o2i
-          in(iidx1) = o1r + o2r
-          in(iidx2) = o2r - o1r
+          in(iidx1    ) = o1r + o2r
+          in(iidx2    ) = o2r - o1r
         }
 
         i += 2
@@ -3194,33 +3179,30 @@ final class DoubleFFT_1D private (
    radbg: Real FFT's backward processing of general factor
    --------------------------------------------------------*/
   private[fft] def radbg(ido: Int, ip: Int, l1: Int, idl1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
-    var idij = 0
-    var ipph = 0
-    var j2 = 0
-    var ic = 0
-    var jc = 0
-    var lc = 0
-    var is = 0
-    var dc2 = .0
-    var ai1 = .0
-    var ai2 = .0
-    var ar1 = .0
-    var ar2 = .0
-    var ds2 = .0
-    var w1r = .0
-    var w1i = .0
-    var nbd = 0
-    var dcp = .0
-    var arg = .0
-    var dsp = .0
-    var ar1h = .0
-    var ar2h = .0
-    val iw1 = offset
-    arg = TWO_PI / ip.toDouble
-    dcp = cos(arg)
-    dsp = sin(arg)
-    nbd = (ido - 1) / 2
-    ipph = (ip + 1) / 2
+    val arg   = TWO_PI / ip.toDouble
+    val dcp   = cos(arg)
+    val dsp   = sin(arg)
+    val iw1   = offset
+    val nbd   = (ido  - 1) / 2
+    val ipph  = (ip   + 1) / 2
+
+    var idij  = 0
+    var j2    = 0
+    var ic    = 0
+    var jc    = 0
+    var lc    = 0
+    var is    = 0
+    var dc2   = 0.0
+    var ai1   = 0.0
+    var ai2   = 0.0
+    var ar1   = 0.0
+    var ar2   = 0.0
+    var ds2   = 0.0
+    var w1r   = 0.0
+    var w1i   = 0.0
+    var ar1h  = 0.0
+    var ar2h  = 0.0
+
     val idx0 = ip * ido
     if (ido >= l1) for (k <- 0 until l1) {
       val idx1 = k * ido
@@ -3244,12 +3226,12 @@ final class DoubleFFT_1D private (
       val idx2 = jc * l1 * ido
       val idx3 = j2 * ido
       for (k <- 0 until l1) {
-        val idx4 = k * ido
-        val idx5 = idx4 * ip
+        val idx4  = k * ido
+        val idx5  = idx4 * ip
         val iidx1 = iidx0 + idx3 + idx5 - ido
         val iidx2 = in_off + idx3 + idx5
-        val i1r = in(iidx1)
-        val i2r = in(iidx2)
+        val i1r   = in(iidx1)
+        val i2r   = in(iidx2)
         out(out_off + idx4 + idx1) = i1r + i1r
         out(out_off + idx4 + idx2) = i2r + i2r
       }
@@ -3264,25 +3246,23 @@ final class DoubleFFT_1D private (
         val idx5 = k * ido + idx2
         val idx6 = k * ip * ido + idx3
         var i = 2
-        while ( {
-          i < ido
-        }) {
+        while (i < ido) {
           ic = ido - i
-          val idx7 = out_off + i
-          val idx8 = in_off + ic
-          val idx9 = in_off + i
+          val idx7  = out_off + i
+          val idx8  = in_off + ic
+          val idx9  = in_off + i
           val oidx1 = idx7 + idx4
           val oidx2 = idx7 + idx5
           val iidx1 = idx9 + idx6
           val iidx2 = idx8 + idx6 - ido
-          val a1i = in(iidx1 - 1)
-          val a1r = in(iidx1)
-          val a2i = in(iidx2 - 1)
-          val a2r = in(iidx2)
+          val a1i   = in(iidx1 - 1)
+          val a1r   = in(iidx1)
+          val a2i   = in(iidx2 - 1)
+          val a2r   = in(iidx2)
           out(oidx1 - 1) = a1i + a2i
           out(oidx2 - 1) = a1i - a2i
-          out(oidx1) = a1r - a2r
-          out(oidx2) = a1r + a2r
+          out(oidx1   ) = a1r - a2r
+          out(oidx2   ) = a1r + a2r
 
           i += 2
         }
@@ -3294,29 +3274,27 @@ final class DoubleFFT_1D private (
       val idx2 = jc * l1 * ido
       val idx3 = 2 * j * ido
       var i = 2
-      while ( {
-        i < ido
-      }) {
+      while (i < ido) {
         ic = ido - i
         val idx7 = out_off + i
         val idx8 = in_off + ic
         val idx9 = in_off + i
         for (k <- 0 until l1) {
-          val idx4 = k * ido + idx1
-          val idx5 = k * ido + idx2
-          val idx6 = k * ip * ido + idx3
+          val idx4  = k * ido + idx1
+          val idx5  = k * ido + idx2
+          val idx6  = k * ip * ido + idx3
           val oidx1 = idx7 + idx4
           val oidx2 = idx7 + idx5
           val iidx1 = idx9 + idx6
           val iidx2 = idx8 + idx6 - ido
-          val a1i = in(iidx1 - 1)
-          val a1r = in(iidx1)
-          val a2i = in(iidx2 - 1)
-          val a2r = in(iidx2)
-          out(oidx1 - 1) = a1i + a2i
-          out(oidx2 - 1) = a1i - a2i
-          out(oidx1) = a1r - a2r
-          out(oidx2) = a1r + a2r
+          val a1i   = in(iidx1 - 1)
+          val a1r   = in(iidx1)
+          val a2i   = in(iidx2 - 1)
+          val a2r   = in(iidx2)
+          out(oidx1 - 1 ) = a1i + a2i
+          out(oidx2 - 1 ) = a1i - a2i
+          out(oidx1     ) = a1r - a2r
+          out(oidx2     ) = a1r + a2r
         }
 
         i += 2
@@ -3326,10 +3304,10 @@ final class DoubleFFT_1D private (
     ai1 = 0
     val idx01 = (ip - 1) * idl1
     for (l <- 1 until ipph) {
-      lc = ip - l
-      ar1h = dcp * ar1 - dsp * ai1
-      ai1 = dcp * ai1 + dsp * ar1
-      ar1 = ar1h
+      lc    = ip - l
+      ar1h  = dcp * ar1 - dsp * ai1
+      ai1   = dcp * ai1 + dsp * ar1
+      ar1   = ar1h
       val idx1 = l * idl1
       val idx2 = lc * idl1
       for (ik <- 0 until idl1) {
@@ -3343,10 +3321,10 @@ final class DoubleFFT_1D private (
       ar2 = ar1
       ai2 = ai1
       for (j <- 2 until ipph) {
-        jc = ip - j
-        ar2h = dc2 * ar2 - ds2 * ai2
-        ai2 = dc2 * ai2 + ds2 * ar2
-        ar2 = ar2h
+        jc    = ip - j
+        ar2h  = dc2 * ar2 - ds2 * ai2
+        ai2   = dc2 * ai2 + ds2 * ar2
+        ar2   = ar2h
         val idx5 = j * idl1
         val idx6 = jc * idl1
         for (ik <- 0 until idl1) {
@@ -3369,12 +3347,12 @@ final class DoubleFFT_1D private (
       val idx1 = j * l1 * ido
       val idx2 = jc * l1 * ido
       for (k <- 0 until l1) {
-        val idx3 = k * ido
+        val idx3  = k * ido
         val oidx1 = out_off + idx3
         val iidx1 = in_off + idx3 + idx1
         val iidx2 = in_off + idx3 + idx2
-        val i1r = in(iidx1)
-        val i2r = in(iidx2)
+        val i1r   = in(iidx1)
+        val i2r   = in(iidx2)
         out(oidx1 + idx1) = i1r - i2r
         out(oidx1 + idx2) = i1r + i2r
       }
@@ -3387,11 +3365,9 @@ final class DoubleFFT_1D private (
       for (k <- 0 until l1) {
         val idx3 = k * ido
         var i = 2
-        while ( {
-          i < ido
-        }) {
+        while (i < ido) {
           val idx4 = out_off + i
-          val idx5 = in_off + i
+          val idx5 = in_off  + i
           val oidx1 = idx4 + idx3 + idx1
           val oidx2 = idx4 + idx3 + idx2
           val iidx1 = idx5 + idx3 + idx1
@@ -3400,10 +3376,10 @@ final class DoubleFFT_1D private (
           val i1r = in(iidx1)
           val i2i = in(iidx2 - 1)
           val i2r = in(iidx2)
-          out(oidx1 - 1) = i1i - i2r
-          out(oidx2 - 1) = i1i + i2r
-          out(oidx1) = i1r + i2i
-          out(oidx2) = i1r - i2i
+          out(oidx1 - 1 ) = i1i - i2r
+          out(oidx2 - 1 ) = i1i + i2r
+          out(oidx1     ) = i1r + i2i
+          out(oidx2     ) = i1r - i2i
 
           i += 2
         }
@@ -3414,25 +3390,23 @@ final class DoubleFFT_1D private (
       val idx1 = j * l1 * ido
       val idx2 = jc * l1 * ido
       var i = 2
-      while ( {
-        i < ido
-      }) {
+      while (i < ido) {
         val idx4 = out_off + i
-        val idx5 = in_off + i
+        val idx5 = in_off  + i
         for (k <- 0 until l1) {
-          val idx3 = k * ido
+          val idx3  = k * ido
           val oidx1 = idx4 + idx3 + idx1
           val oidx2 = idx4 + idx3 + idx2
           val iidx1 = idx5 + idx3 + idx1
           val iidx2 = idx5 + idx3 + idx2
-          val i1i = in(iidx1 - 1)
-          val i1r = in(iidx1)
-          val i2i = in(iidx2 - 1)
-          val i2r = in(iidx2)
-          out(oidx1 - 1) = i1i - i2r
-          out(oidx2 - 1) = i1i + i2r
-          out(oidx1) = i1r + i2i
-          out(oidx2) = i1r - i2i
+          val i1i   = in(iidx1 - 1)
+          val i1r   = in(iidx1)
+          val i2i   = in(iidx2 - 1)
+          val i2r   = in(iidx2)
+          out(oidx1 - 1 ) = i1i - i2r
+          out(oidx2 - 1 ) = i1i + i2r
+          out(oidx1     ) = i1r + i2i
+          out(oidx2     ) = i1r - i2i
         }
 
         i += 2
@@ -3453,9 +3427,7 @@ final class DoubleFFT_1D private (
         idij = is - 1
         val idx1 = j * l1 * ido
         var i = 2
-        while ( {
-          i < ido
-        }) {
+        while (i < ido) {
           idij += 2
           val idx2 = idij + iw1
           w1r = wtable_r(idx2 - 1)
@@ -3463,13 +3435,13 @@ final class DoubleFFT_1D private (
           val idx4 = in_off + i
           val idx5 = out_off + i
           for (k <- 0 until l1) {
-            val idx3 = k * ido + idx1
+            val idx3  = k * ido + idx1
             val iidx1 = idx4 + idx3
             val oidx1 = idx5 + idx3
-            val o1i = out(oidx1 - 1)
-            val o1r = out(oidx1)
+            val o1i   = out(oidx1 - 1)
+            val o1r   = out(oidx1)
             in(iidx1 - 1) = w1r * o1i - w1i * o1r
-            in(iidx1) = w1r * o1r + w1i * o1i
+            in(iidx1    ) = w1r * o1r + w1i * o1i
           }
 
           i += 2
@@ -3485,21 +3457,19 @@ final class DoubleFFT_1D private (
           idij = is - 1
           val idx3 = k * ido + idx1
           var i = 2
-          while ( {
-            i < ido
-          }) {
+          while (i < ido) {
             idij += 2
             val idx2 = idij + iw1
             w1r = wtable_r(idx2 - 1)
             w1i = wtable_r(idx2)
-            val idx4 = in_off + i
-            val idx5 = out_off + i
+            val idx4  = in_off + i
+            val idx5  = out_off + i
             val iidx1 = idx4 + idx3
             val oidx1 = idx5 + idx3
-            val o1i = out(oidx1 - 1)
-            val o1r = out(oidx1)
+            val o1i   = out(oidx1 - 1)
+            val o1r   = out(oidx1)
             in(iidx1 - 1) = w1r * o1i - w1i * o1r
-            in(iidx1) = w1r * o1r + w1i * o1i
+            in(iidx1    ) = w1r * o1r + w1i * o1i
 
             i += 2
           }

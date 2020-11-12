@@ -4,15 +4,11 @@ lazy val baseNameL = baseName.toLowerCase
 lazy val projectVersion = "0.1.0-SNAPSHOT"
 lazy val mimaVersion    = "0.1.0"
 
-lazy val deps = new {
-  val test = new {
-    val scalaTest = "3.2.3"
-  }
-}
-
 lazy val commonJvmSettings = Seq(
   crossScalaVersions := Seq("3.0.0-M1", "2.13.3", "2.12.12"),
 )
+
+val ENABLE_JAVA = false
 
 lazy val root = project.in(file(".")) // crossProject(JSPlatform, JVMPlatform).in(file("."))
   .settings(commonJvmSettings)
@@ -25,12 +21,21 @@ lazy val root = project.in(file(".")) // crossProject(JSPlatform, JVMPlatform).i
     homepage           := Some(url(s"https://github.com/Sciss/${name.value}")),
     licenses           := Seq("BSD 2-Clause" -> url("http://opensource.org/licenses/BSD-2-Clause")),
     mimaPreviousArtifacts := Set("de.sciss" %% baseNameL % mimaVersion),
-    libraryDependencies ++= Seq(
-      "org.apache.commons"  %   "commons-math3" % "3.5",
-      "pl.edu.icm"          %   "JLargeArrays"  % "1.5",
-      "junit"               %   "junit"         % "4.13.1" % Test,
-//      "org.scalatest"       %%  "scalatest"     % deps.test.scalaTest % Test,
-    ),
+    libraryDependencies ++= {
+      if (!ENABLE_JAVA) Nil else Seq(
+        "org.apache.commons"  %   "commons-math3" % "3.5",
+        "pl.edu.icm"          %   "JLargeArrays"  % "1.5",
+        "junit"               %   "junit"         % "4.13.1" % Test,
+      )
+    },
+    unmanagedSourceDirectories in Compile := {
+      val all = (unmanagedSourceDirectories in Compile).value
+      if (ENABLE_JAVA) all else all.filterNot(_.getPath.contains("java"))
+    },
+    unmanagedSourceDirectories in Test := {
+      val all = (unmanagedSourceDirectories in Test).value
+      if (ENABLE_JAVA) all else all.filterNot(_.getPath.contains("java"))
+    },
     scalacOptions ++= Seq(
       "-deprecation", "-unchecked", "-feature", "-encoding", "utf8", "-Xlint", "-Xsource:2.13",
     ),
@@ -38,7 +43,7 @@ lazy val root = project.in(file(".")) // crossProject(JSPlatform, JVMPlatform).i
       val jdkGt8  = scala.util.Properties.isJavaAtLeast("9")
       val sv      = scalaVersion.value
       val isDotty = sv.startsWith("3.") // https://github.com/lampepfl/dotty/issues/8634
-      val sq0     = (if (!isDotty && jdkGt8) List("-release", "8") else Nil)
+      val sq0     = if (!isDotty && jdkGt8) List("-release", "8") else Nil
       if (sv.startsWith("2.12.")) sq0 else "-Wvalue-discard" :: sq0
     }, // JDK >8 breaks API; skip scala-doc
   )
