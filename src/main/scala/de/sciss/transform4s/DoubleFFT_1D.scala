@@ -34,10 +34,6 @@ import java.util.logging.Level
 import java.util.logging.Logger
 
 import pl.edu.icm.jlargearrays.ConcurrencyUtils
-import pl.edu.icm.jlargearrays.DoubleLargeArray
-import pl.edu.icm.jlargearrays.LargeArray
-import pl.edu.icm.jlargearrays.LongLargeArray
-import pl.edu.icm.jlargearrays.LargeArrayUtils
 import org.apache.commons.math3.util.FastMath._
 
 
@@ -54,133 +50,78 @@ import org.apache.commons.math3.util.FastMath._
  * @author Piotr Wendykier (piotr.wendykier@gmail.com)
  */
 object DoubleFFT_1D {
-
-  private object Plans extends Enumeration {
-    type Plans = Value
-    val SPLIT_RADIX, MIXED_RADIX, BLUESTEIN = Value
-  }
+  private type Plans = Int
+  private final val SPLIT_RADIX = 0
+  private final val MIXED_RADIX = 1
+  private final val BLUESTEIN   = 2
 
   private val factors = Array(4, 2, 3, 5)
   private val PI      = 3.14159265358979311599796346854418516
   private val TWO_PI  = 6.28318530717958623199592693708837032
 }
 
-final class DoubleFFT_1D(n0: Long) {
+final class DoubleFFT_1D(n0: Int) {
   import DoubleFFT_1D._
-  import Plans._
 
   private var n = 0
 
-  private var nl = 0L
-
   private var nBluestein = 0
-
-  private var nBluesteinl = 0L
 
   private var ip: Array[Int] = null
 
-  private var ipl: LongLargeArray = null
-
   private var w: Array[Double] = null
-
-  private var wl: DoubleLargeArray = null
 
   private var nw = 0
 
-  private var nwl = 0L
-
   private var nc = 0
-
-  private var ncl = 0L
 
   private var wtable: Array[Double] = null
 
-  private var wtablel: DoubleLargeArray = null
-
   private var wtable_r: Array[Double] = null
-
-  private var wtable_rl: DoubleLargeArray = null
 
   private var bk1: Array[Double] = null
 
-  private var bk1l: DoubleLargeArray = null
-
   private var bk2: Array[Double] = null
 
-  private var bk2l: DoubleLargeArray = null
-
-  private var plan: Plans = null
-
-  private var useLargeArrays = false
+  private var plan: Plans = 0
 
   // constructor
 
   {
     if (n0 < 1) throw new IllegalArgumentException("n must be greater than 0")
-    this.useLargeArrays = CommonUtils.isUseLargeArrays || 2 * n0 > LargeArray.getMaxSizeOf32bitArray
-    this.n = n0.toInt
-    this.nl = n0
-    if (this.useLargeArrays == false) if (!CommonUtils.isPowerOf2(n0)) if (CommonUtils.getReminder(n0, factors) >= 211) {
-      plan = Plans.BLUESTEIN
-      nBluestein = CommonUtils.nextPow2(this.n * 2 - 1)
-      bk1 = new Array[Double](2 * nBluestein)
-      bk2 = new Array[Double](2 * nBluestein)
-      this.ip = new Array[Int](2 + ceil(2 + (1 << (log(nBluestein + 0.5) / log(2)).toInt / 2)).toInt)
-      this.w = new Array[Double](nBluestein)
-      val twon = 2 * nBluestein
-      nw = twon >> 2
+    this.n    = n0
+
+    if (!CommonUtils.isPowerOf2(n0)) {
+      if (CommonUtils.getReminder(n0, factors) >= 211) {
+        plan        = BLUESTEIN
+        nBluestein  = CommonUtils.nextPow2(this.n * 2 - 1)
+        bk1         = new Array[Double](2 * nBluestein)
+        bk2         = new Array[Double](2 * nBluestein)
+        this.ip     = new Array[Int](2 + ceil(2 + (1 << (log(nBluestein + 0.5) / log(2)).toInt / 2)).toInt)
+        this.w      = new Array[Double](nBluestein)
+        val twon    = 2 * nBluestein
+        nw          = twon >> 2
+        CommonUtils.makewt(nw, ip, w)
+        nc          = nBluestein >> 2
+        CommonUtils.makect(nc, w, nw, ip)
+        bluesteini()
+      }
+      else {
+        plan        = MIXED_RADIX
+        wtable      = new Array[Double](4 * this.n + 15)
+        wtable_r    = new Array[Double](2 * this.n + 15)
+        cffti()
+        rffti()
+      }
+    } else {
+      plan          = SPLIT_RADIX
+      this.ip       = new Array[Int](2 + ceil(2 + (1 << (log(n0 + 0.5) / log(2)).toInt / 2)).toInt)
+      this.w        = new Array[Double](this.n)
+      val twon      = 2 * this.n
+      nw            = twon >> 2
       CommonUtils.makewt(nw, ip, w)
-      nc = nBluestein >> 2
+      nc            = this.n >> 2
       CommonUtils.makect(nc, w, nw, ip)
-      bluesteini()
-    }
-    else {
-      plan = Plans.MIXED_RADIX
-      wtable = new Array[Double](4 * this.n + 15)
-      wtable_r = new Array[Double](2 * this.n + 15)
-      cffti()
-      rffti()
-    }
-    else {
-      plan = Plans.SPLIT_RADIX
-      this.ip = new Array[Int](2 + ceil(2 + (1 << (log(n0 + 0.5) / log(2)).toInt / 2)).toInt)
-      this.w = new Array[Double](this.n)
-      val twon = 2 * this.n
-      nw = twon >> 2
-      CommonUtils.makewt(nw, ip, w)
-      nc = this.n >> 2
-      CommonUtils.makect(nc, w, nw, ip)
-    }
-    else if (!CommonUtils.isPowerOf2(nl)) if (CommonUtils.getReminder(nl, factors) >= 211) {
-      plan = Plans.BLUESTEIN
-      nBluesteinl = CommonUtils.nextPow2(nl * 2 - 1)
-      bk1l = new DoubleLargeArray(2l * nBluesteinl)
-      bk2l = new DoubleLargeArray(2l * nBluesteinl)
-      this.ipl = new LongLargeArray(2l + ceil(2l + (1l << (log(nBluesteinl + 0.5) / log(2.0)).toLong / 2)).toLong)
-      this.wl = new DoubleLargeArray(nBluesteinl)
-      val twon = 2 * nBluesteinl
-      nwl = twon >> 2l
-      CommonUtils.makewt(nwl, ipl, wl)
-      ncl = nBluesteinl >> 2l
-      CommonUtils.makect(ncl, wl, nwl, ipl)
-      bluesteinil()
-    }
-    else {
-      plan = Plans.MIXED_RADIX
-      wtablel = new DoubleLargeArray(4 * nl + 15)
-      wtable_rl = new DoubleLargeArray(2 * nl + 15)
-      cfftil()
-      rfftil()
-    }
-    else {
-      plan = Plans.SPLIT_RADIX
-      this.ipl = new LongLargeArray(2l + ceil(2 + (1l << (log(nl + 0.5) / log(2)).toLong / 2)).toLong)
-      this.wl = new DoubleLargeArray(nl)
-      val twon = 2 * nl
-      nwl = twon >> 2l
-      CommonUtils.makewt(nwl, ipl, wl)
-      ncl = nl >> 2l
-      CommonUtils.makect(ncl, wl, nwl, ipl)
     }
   }
 
@@ -198,13 +139,8 @@ final class DoubleFFT_1D(n0: Long) {
    *
    * @param a data to transform
    */
-  def complexForward(a: Array[Double]): Unit = {
+  def complexForward(a: Array[Double]): Unit =
     complexForward(a, 0)
-  }
-
-  def complexForward(a: DoubleLargeArray): Unit = {
-    complexForward(a, 0)
-  }
 
   /**
    * Computes 1D forward DFT of complex data leaving the result in
@@ -222,39 +158,16 @@ final class DoubleFFT_1D(n0: Long) {
    * @param offa index of the first element in array <code>a</code>
    */
   def complexForward(a: Array[Double], offa: Int): Unit = {
-    if (useLargeArrays) complexForward(new DoubleLargeArray(a), offa)
-    else {
-      if (n == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          CommonUtils.cftbsub(2 * n, a, offa, ip, nw, w)
+    if (n == 1) return
+    plan match {
+      case SPLIT_RADIX =>
+        CommonUtils.cftbsub(2 * n, a, offa, ip, nw, w)
 
-        case MIXED_RADIX =>
-          cfftf(a, offa, -1)
+      case MIXED_RADIX =>
+        cfftf(a, offa, -1)
 
-        case BLUESTEIN =>
-          bluestein_complex(a, offa, -1)
-
-      }
-    }
-  }
-
-  def complexForward(a: DoubleLargeArray, offa: Long): Unit = {
-    if (!useLargeArrays) if (!a.isLarge && !a.isConstant && offa < Integer.MAX_VALUE) complexForward(a.getData, offa.toInt)
-    else throw new IllegalArgumentException("The data array is too big.")
-    else {
-      if (nl == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          CommonUtils.cftbsub(2 * nl, a, offa, ipl, nwl, wl)
-
-        case MIXED_RADIX =>
-          cfftf(a, offa, -1)
-
-        case BLUESTEIN =>
-          bluestein_complex(a, offa, -1)
-
-      }
+      case BLUESTEIN =>
+        bluestein_complex(a, offa, -1)
     }
   }
 
@@ -273,13 +186,8 @@ final class DoubleFFT_1D(n0: Long) {
    * @param a     data to transform
    * @param scale if true then scaling is performed
    */
-  def complexInverse(a: Array[Double], scale: Boolean): Unit = {
+  def complexInverse(a: Array[Double], scale: Boolean): Unit =
     complexInverse(a, 0, scale)
-  }
-
-  def complexInverse(a: DoubleLargeArray, scale: Boolean): Unit = {
-    complexInverse(a, 0, scale)
-  }
 
   /**
    * Computes 1D inverse DFT of complex data leaving the result in
@@ -298,42 +206,19 @@ final class DoubleFFT_1D(n0: Long) {
    * @param scale if true then scaling is performed
    */
   def complexInverse(a: Array[Double], offa: Int, scale: Boolean): Unit = {
-    if (useLargeArrays) complexInverse(new DoubleLargeArray(a), offa, scale)
-    else {
-      if (n == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          CommonUtils.cftfsub(2 * n, a, offa, ip, nw, w)
+    if (n == 1) return
+    plan match {
+      case SPLIT_RADIX =>
+        CommonUtils.cftfsub(2 * n, a, offa, ip, nw, w)
 
-        case MIXED_RADIX =>
-          cfftf(a, offa, +1)
+      case MIXED_RADIX =>
+        cfftf(a, offa, +1)
 
-        case BLUESTEIN =>
-          bluestein_complex(a, offa, 1)
+      case BLUESTEIN =>
+        bluestein_complex(a, offa, 1)
 
-      }
-      if (scale) CommonUtils.scale(n, 1.0 / n.toDouble, a, offa, true)
     }
-  }
-
-  def complexInverse(a: DoubleLargeArray, offa: Long, scale: Boolean): Unit = {
-    if (!useLargeArrays) if (!a.isLarge && !a.isConstant && offa < Integer.MAX_VALUE) complexInverse(a.getData, offa.toInt, scale)
-    else throw new IllegalArgumentException("The data array is too big.")
-    else {
-      if (nl == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          CommonUtils.cftfsub(2 * nl, a, offa, ipl, nwl, wl)
-
-        case MIXED_RADIX =>
-          cfftf(a, offa, +1)
-
-        case BLUESTEIN =>
-          bluestein_complex(a, offa, 1)
-
-      }
-      if (scale) CommonUtils.scale(nl, 1.0 / nl.toDouble, a, offa, true)
-    }
+    if (scale) CommonUtils.scale(n, 1.0 / n.toDouble, a, offa, true)
   }
 
   /**
@@ -363,40 +248,8 @@ final class DoubleFFT_1D(n0: Long) {
    *
    * @param a data to transform
    */
-  def realForward(a: Array[Double]): Unit = {
+  def realForward(a: Array[Double]): Unit =
     realForward(a, 0)
-  }
-
-  /**
-   * Computes 1D forward DFT of real data leaving the result in <code>a</code>
-   * . The physical layout of the output data is as follows:<br>
-   *
-   * if n is even then
-   *
-   * <pre>
-   * a[2*k] = Re[k], 0&lt;=k&lt;n/2
-   * a[2*k+1] = Im[k], 0&lt;k&lt;n/2
-   * a[1] = Re[n/2]
-   * </pre>
-   *
-   * if n is odd then
-   *
-   * <pre>
-   * a[2*k] = Re[k], 0&lt;=k&lt;(n+1)/2
-   * a[2*k+1] = Im[k], 0&lt;k&lt;(n-1)/2
-   * a[1] = Im[(n-1)/2]
-   * </pre>
-   *
-   * This method computes only half of the elements of the real transform. The
-   * other half satisfies the symmetry condition. If you want the full real
-   * forward transform, use <code>realForwardFull</code>. To get back the
-   * original data, use <code>realInverse</code> on the output of this method.
-   *
-   * @param a data to transform
-   */
-  def realForward(a: DoubleLargeArray): Unit = {
-    realForward(a, 0)
-  }
 
   /**
    * Computes 1D forward DFT of real data leaving the result in <code>a</code>
@@ -427,67 +280,31 @@ final class DoubleFFT_1D(n0: Long) {
    * @param offa index of the first element in array <code>a</code>
    */
   def realForward(a: Array[Double], offa: Int): Unit = {
-    if (useLargeArrays) realForward(new DoubleLargeArray(a), offa)
-    else {
-      if (n == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          var xi = .0
-          if (n > 4) {
-            CommonUtils.cftfsub(n, a, offa, ip, nw, w)
-            CommonUtils.rftfsub(n, a, offa, nc, w, nw)
-          }
-          else if (n == 4) CommonUtils.cftx020(a, offa)
-          xi = a(offa) - a(offa + 1)
-          a(offa) += a(offa + 1)
-          a(offa + 1) = xi
+    if (n == 1) return
+    plan match {
+      case SPLIT_RADIX =>
+        var xi = .0
+        if (n > 4) {
+          CommonUtils.cftfsub(n, a, offa, ip, nw, w)
+          CommonUtils.rftfsub(n, a, offa, nc, w, nw)
+        }
+        else if (n == 4) CommonUtils.cftx020(a, offa)
+        xi = a(offa) - a(offa + 1)
+        a(offa) += a(offa + 1)
+        a(offa + 1) = xi
 
-        case MIXED_RADIX =>
-          rfftf(a, offa)
-          for (k <- n - 1 to 2 by -1) {
-            val idx = offa + k
-            val tmp = a(idx)
-            a(idx) = a(idx - 1)
-            a(idx - 1) = tmp
-          }
+      case MIXED_RADIX =>
+        rfftf(a, offa)
+        for (k <- n - 1 to 2 by -1) {
+          val idx = offa + k
+          val tmp = a(idx)
+          a(idx) = a(idx - 1)
+          a(idx - 1) = tmp
+        }
 
-        case BLUESTEIN =>
-          bluestein_real_forward(a, offa)
+      case BLUESTEIN =>
+        bluestein_real_forward(a, offa)
 
-      }
-    }
-  }
-
-  def realForward(a: DoubleLargeArray, offa: Long): Unit = {
-    if (!useLargeArrays) if (!a.isLarge && !a.isConstant && offa < Integer.MAX_VALUE) realForward(a.getData, offa.toInt)
-    else throw new IllegalArgumentException("The data array is too big.")
-    else {
-      if (nl == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          var xi = .0
-          if (nl > 4) {
-            CommonUtils.cftfsub(nl, a, offa, ipl, nwl, wl)
-            CommonUtils.rftfsub(nl, a, offa, ncl, wl, nwl)
-          }
-          else if (nl == 4) CommonUtils.cftx020(a, offa)
-          xi = a.getDouble(offa) - a.getDouble(offa + 1)
-          a.setDouble(offa, a.getDouble(offa) + a.getDouble(offa + 1))
-          a.setDouble(offa + 1, xi)
-
-        case MIXED_RADIX =>
-          rfftf(a, offa)
-          for (k <- nl - 1 to 2 by -1) {
-            val idx = offa + k
-            val tmp = a.getDouble(idx)
-            a.setDouble(idx, a.getDouble(idx - 1))
-            a.setDouble(idx - 1, tmp)
-          }
-
-        case BLUESTEIN =>
-          bluestein_real_forward(a, offa)
-
-      }
     }
   }
 
@@ -502,13 +319,8 @@ final class DoubleFFT_1D(n0: Long) {
    *
    * @param a data to transform
    */
-  def realForwardFull(a: Array[Double]): Unit = {
+  def realForwardFull(a: Array[Double]): Unit =
     realForwardFull(a, 0)
-  }
-
-  def realForwardFull(a: DoubleLargeArray): Unit = {
-    realForwardFull(a, 0)
-  }
 
   /**
    * Computes 1D forward DFT of real data leaving the result in <code>a</code>
@@ -523,153 +335,74 @@ final class DoubleFFT_1D(n0: Long) {
    * @param offa index of the first element in array <code>a</code>
    */
   def realForwardFull(a: Array[Double], offa: Int): Unit = {
-    if (useLargeArrays) realForwardFull(new DoubleLargeArray(a), offa)
-    else {
-      val twon = 2 * n
-      plan match {
-        case SPLIT_RADIX =>
-          realForward(a, offa)
-          val nthreads = ConcurrencyUtils.getNumberOfThreads
-          if ((nthreads > 1) && (n / 2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
-            val futures = new Array[Future[_]](nthreads)
-            val k = n / 2 / nthreads
-            for (i <- 0 until nthreads) {
-              val firstIdx = i * k
-              val lastIdx = if (i == (nthreads - 1)) n / 2
-              else firstIdx + k
-              futures(i) = ConcurrencyUtils.submit(new Runnable() {
-                override def run(): Unit = {
-                  var idx1 = 0
-                  var idx2 = 0
-                  for (k <- firstIdx until lastIdx) {
-                    idx1 = 2 * k
-                    idx2 = offa + ((twon - idx1) % twon)
-                    a(idx2) = a(offa + idx1)
-                    a(idx2 + 1) = -a(offa + idx1 + 1)
-                  }
+    val twon = 2 * n
+    plan match {
+      case SPLIT_RADIX =>
+        realForward(a, offa)
+        val nthreads = ConcurrencyUtils.getNumberOfThreads
+        if ((nthreads > 1) && (n / 2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+          val futures = new Array[Future[_]](nthreads)
+          val k = n / 2 / nthreads
+          for (i <- 0 until nthreads) {
+            val firstIdx = i * k
+            val lastIdx = if (i == (nthreads - 1)) n / 2
+            else firstIdx + k
+            futures(i) = ConcurrencyUtils.submit(new Runnable() {
+              override def run(): Unit = {
+                var idx1 = 0
+                var idx2 = 0
+                for (k <- firstIdx until lastIdx) {
+                  idx1 = 2 * k
+                  idx2 = offa + ((twon - idx1) % twon)
+                  a(idx2) = a(offa + idx1)
+                  a(idx2 + 1) = -a(offa + idx1 + 1)
                 }
-              })
-            }
-            try ConcurrencyUtils.waitForCompletion(futures)
-            catch {
-              case ex: InterruptedException =>
-                Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-              case ex: ExecutionException =>
-                Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-            }
+              }
+            })
           }
-          else {
-            var idx1 = 0
-            var idx2 = 0
-            for (k <- 0 until n / 2) {
-              idx1 = 2 * k
-              idx2 = offa + ((twon - idx1) % twon)
-              a(idx2) = a(offa + idx1)
-              a(idx2 + 1) = -a(offa + idx1 + 1)
-            }
+          try ConcurrencyUtils.waitForCompletion(futures)
+          catch {
+            case ex: InterruptedException =>
+              Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
+            case ex: ExecutionException =>
+              Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
           }
-          a(offa + n) = -a(offa + 1)
-          a(offa + 1) = 0
+        }
+        else {
+          var idx1 = 0
+          var idx2 = 0
+          for (k <- 0 until n / 2) {
+            idx1 = 2 * k
+            idx2 = offa + ((twon - idx1) % twon)
+            a(idx2) = a(offa + idx1)
+            a(idx2 + 1) = -a(offa + idx1 + 1)
+          }
+        }
+        a(offa + n) = -a(offa + 1)
+        a(offa + 1) = 0
 
-        case MIXED_RADIX =>
-          rfftf(a, offa)
-          var m = 0
-          if (n % 2 == 0) m = n / 2
-          else m = (n + 1) / 2
-          for (k <- 1 until m) {
-            val idx1 = offa + twon - 2 * k
-            val idx2 = offa + 2 * k
-            a(idx1 + 1) = -a(idx2)
-            a(idx1) = a(idx2 - 1)
-          }
-          for (k <- 1 until n) {
-            val idx = offa + n - k
-            val tmp = a(idx + 1)
-            a(idx + 1) = a(idx)
-            a(idx) = tmp
-          }
-          a(offa + 1) = 0
+      case MIXED_RADIX =>
+        rfftf(a, offa)
+        var m = 0
+        if (n % 2 == 0) m = n / 2
+        else m = (n + 1) / 2
+        for (k <- 1 until m) {
+          val idx1 = offa + twon - 2 * k
+          val idx2 = offa + 2 * k
+          a(idx1 + 1) = -a(idx2)
+          a(idx1) = a(idx2 - 1)
+        }
+        for (k <- 1 until n) {
+          val idx = offa + n - k
+          val tmp = a(idx + 1)
+          a(idx + 1) = a(idx)
+          a(idx) = tmp
+        }
+        a(offa + 1) = 0
 
-        case BLUESTEIN =>
-          bluestein_real_full(a, offa, -1)
+      case BLUESTEIN =>
+        bluestein_real_full(a, offa, -1)
 
-      }
-    }
-  }
-
-  def realForwardFull(a: DoubleLargeArray, offa: Long): Unit = {
-    if (!useLargeArrays) if (!a.isLarge && !a.isConstant && offa < Integer.MAX_VALUE) realForwardFull(a.getData, offa.toInt)
-    else throw new IllegalArgumentException("The data array is too big.")
-    else {
-      val twon = 2 * nl
-      plan match {
-        case SPLIT_RADIX =>
-          realForward(a, offa)
-          val nthreads = ConcurrencyUtils.getNumberOfThreads
-          if ((nthreads > 1) && (nl / 2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
-            val futures = new Array[Future[_]](nthreads)
-            val k = nl / 2 / nthreads
-            for (i <- 0 until nthreads) {
-              val firstIdx = i * k
-              val lastIdx = if (i == (nthreads - 1)) nl / 2
-              else firstIdx + k
-              futures(i) = ConcurrencyUtils.submit(new Runnable() {
-                override def run(): Unit = {
-                  var idx1 = 0L
-                  var idx2 = 0L
-                  for (k <- firstIdx until lastIdx) {
-                    idx1 = 2 * k
-                    idx2 = offa + ((twon - idx1) % twon)
-                    a.setDouble(idx2, a.getDouble(offa + idx1))
-                    a.setDouble(idx2 + 1, -a.getDouble(offa + idx1 + 1))
-                  }
-                }
-              })
-            }
-            try ConcurrencyUtils.waitForCompletion(futures)
-            catch {
-              case ex: InterruptedException =>
-                Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-              case ex: ExecutionException =>
-                Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-            }
-          }
-          else {
-            var idx1 = 0L
-            var idx2 = 0L
-            for (k <- 0L until nl / 2) {
-              idx1 = 2 * k
-              idx2 = offa + ((twon - idx1) % twon)
-              a.setDouble(idx2, a.getDouble(offa + idx1))
-              a.setDouble(idx2 + 1, -a.getDouble(offa + idx1 + 1))
-            }
-          }
-          a.setDouble(offa + nl, -a.getDouble(offa + 1))
-          a.setDouble(offa + 1, 0)
-
-        case MIXED_RADIX =>
-          rfftf(a, offa)
-          var m = 0L
-          if (nl % 2 == 0) m = nl / 2
-          else m = (nl + 1) / 2
-          for (k <- 1L until m) {
-            val idx1 = offa + twon - 2 * k
-            val idx2 = offa + 2 * k
-            a.setDouble(idx1 + 1, -a.getDouble(idx2))
-            a.setDouble(idx1, a.getDouble(idx2 - 1))
-          }
-          for (k <- 1L until nl) {
-            val idx = offa + nl - k
-            val tmp = a.getDouble(idx + 1)
-            a.setDouble(idx + 1, a.getDouble(idx))
-            a.setDouble(idx, tmp)
-          }
-          a.setDouble(offa + 1, 0)
-
-        case BLUESTEIN =>
-          bluestein_real_full(a, offa, -1)
-
-      }
     }
   }
 
@@ -700,40 +433,8 @@ final class DoubleFFT_1D(n0: Long) {
    * @param a     data to transform
    * @param scale if true then scaling is performed
    */
-  def realInverse(a: Array[Double], scale: Boolean): Unit = {
+  def realInverse(a: Array[Double], scale: Boolean): Unit =
     realInverse(a, 0, scale)
-  }
-
-  /**
-   * Computes 1D inverse DFT of real data leaving the result in <code>a</code>
-   * . The physical layout of the input data has to be as follows:<br>
-   *
-   * if n is even then
-   *
-   * <pre>
-   * a[2*k] = Re[k], 0&lt;=k&lt;n/2
-   * a[2*k+1] = Im[k], 0&lt;k&lt;n/2
-   * a[1] = Re[n/2]
-   * </pre>
-   *
-   * if n is odd then
-   *
-   * <pre>
-   * a[2*k] = Re[k], 0&lt;=k&lt;(n+1)/2
-   * a[2*k+1] = Im[k], 0&lt;k&lt;(n-1)/2
-   * a[1] = Im[(n-1)/2]
-   * </pre>
-   *
-   * This method computes only half of the elements of the real transform. The
-   * other half satisfies the symmetry condition. If you want the full real
-   * inverse transform, use <code>realInverseFull</code>.
-   *
-   * @param a     data to transform
-   * @param scale if true then scaling is performed
-   */
-  def realInverse(a: DoubleLargeArray, scale: Boolean): Unit = {
-    realInverse(a, 0, scale)
-  }
 
   /**
    * Computes 1D inverse DFT of real data leaving the result in <code>a</code>
@@ -764,69 +465,32 @@ final class DoubleFFT_1D(n0: Long) {
    * @param scale if true then scaling is performed
    */
   def realInverse(a: Array[Double], offa: Int, scale: Boolean): Unit = {
-    if (useLargeArrays) realInverse(new DoubleLargeArray(a), offa, scale)
-    else {
-      if (n == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          a(offa + 1) = 0.5 * (a(offa) - a(offa + 1))
-          a(offa) -= a(offa + 1)
-          if (n > 4) {
-            CommonUtils.rftfsub(n, a, offa, nc, w, nw)
-            CommonUtils.cftbsub(n, a, offa, ip, nw, w)
-          }
-          else if (n == 4) CommonUtils.cftxc020(a, offa)
-          if (scale) CommonUtils.scale(n, 1.0 / (n / 2.0), a, offa, false)
+    if (n == 1) return
+    plan match {
+      case SPLIT_RADIX =>
+        a(offa + 1) = 0.5 * (a(offa) - a(offa + 1))
+        a(offa) -= a(offa + 1)
+        if (n > 4) {
+          CommonUtils.rftfsub(n, a, offa, nc, w, nw)
+          CommonUtils.cftbsub(n, a, offa, ip, nw, w)
+        }
+        else if (n == 4) CommonUtils.cftxc020(a, offa)
+        if (scale) CommonUtils.scale(n, 1.0 / (n / 2.0), a, offa, false)
 
-        case MIXED_RADIX =>
-          for (k <- 2 until n) {
-            val idx = offa + k
-            val tmp = a(idx - 1)
-            a(idx - 1) = a(idx)
-            a(idx) = tmp
-          }
-          rfftb(a, offa)
-          if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
+      case MIXED_RADIX =>
+        for (k <- 2 until n) {
+          val idx = offa + k
+          val tmp = a(idx - 1)
+          a(idx - 1) = a(idx)
+          a(idx) = tmp
+        }
+        rfftb(a, offa)
+        if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
 
-        case BLUESTEIN =>
-          bluestein_real_inverse(a, offa)
-          if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
+      case BLUESTEIN =>
+        bluestein_real_inverse(a, offa)
+        if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
 
-      }
-    }
-  }
-
-  def realInverse(a: DoubleLargeArray, offa: Long, scale: Boolean): Unit = {
-    if (!useLargeArrays) if (!a.isLarge && !a.isConstant && offa < Integer.MAX_VALUE) realInverse(a.getData, offa.toInt, scale)
-    else throw new IllegalArgumentException("The data array is too big.")
-    else {
-      if (nl == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          a.setDouble(offa + 1, 0.5 * (a.getDouble(offa) - a.getDouble(offa + 1)))
-          a.setDouble(offa, a.getDouble(offa) - a.getDouble(offa + 1))
-          if (nl > 4) {
-            CommonUtils.rftfsub(nl, a, offa, ncl, wl, nwl)
-            CommonUtils.cftbsub(nl, a, offa, ipl, nwl, wl)
-          }
-          else if (nl == 4) CommonUtils.cftxc020(a, offa)
-          if (scale) CommonUtils.scale(nl, 1.0 / (nl / 2.0), a, offa, false)
-
-        case MIXED_RADIX =>
-          for (k <- 2L until nl) {
-            val idx = offa + k
-            val tmp = a.getDouble(idx - 1)
-            a.setDouble(idx - 1, a.getDouble(idx))
-            a.setDouble(idx, tmp)
-          }
-          rfftb(a, offa)
-          if (scale) CommonUtils.scale(nl, 1.0 / nl, a, offa, false)
-
-        case BLUESTEIN =>
-          bluestein_real_inverse(a, offa)
-          if (scale) CommonUtils.scale(nl, 1.0 / nl, a, offa, false)
-
-      }
     }
   }
 
@@ -841,13 +505,8 @@ final class DoubleFFT_1D(n0: Long) {
    * @param a     data to transform
    * @param scale if true then scaling is performed
    */
-  def realInverseFull(a: Array[Double], scale: Boolean): Unit = {
+  def realInverseFull(a: Array[Double], scale: Boolean): Unit =
     realInverseFull(a, 0, scale)
-  }
-
-  def realInverseFull(a: DoubleLargeArray, scale: Boolean): Unit = {
-    realInverseFull(a, 0, scale)
-  }
 
   /**
    * Computes 1D inverse DFT of real data leaving the result in <code>a</code>
@@ -862,267 +521,134 @@ final class DoubleFFT_1D(n0: Long) {
    * @param scale if true then scaling is performed
    */
   def realInverseFull(a: Array[Double], offa: Int, scale: Boolean): Unit = {
-    if (useLargeArrays) realInverseFull(new DoubleLargeArray(a), offa, scale)
-    else {
-      val twon = 2 * n
-      plan match {
-        case SPLIT_RADIX =>
-          realInverse2(a, offa, scale)
-          val nthreads = ConcurrencyUtils.getNumberOfThreads
-          if ((nthreads > 1) && (n / 2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
-            val futures = new Array[Future[_]](nthreads)
-            val k = n / 2 / nthreads
-            for (i <- 0 until nthreads) {
-              val firstIdx = i * k
-              val lastIdx = if (i == (nthreads - 1)) n / 2
-              else firstIdx + k
-              futures(i) = ConcurrencyUtils.submit(new Runnable() {
-                override def run(): Unit = {
-                  var idx1 = 0
-                  var idx2 = 0
-                  for (k <- firstIdx until lastIdx) {
-                    idx1 = 2 * k
-                    idx2 = offa + ((twon - idx1) % twon)
-                    a(idx2) = a(offa + idx1)
-                    a(idx2 + 1) = -a(offa + idx1 + 1)
-                  }
+    val twon = 2 * n
+    plan match {
+      case SPLIT_RADIX =>
+        realInverse2(a, offa, scale)
+        val nthreads = ConcurrencyUtils.getNumberOfThreads
+        if ((nthreads > 1) && (n / 2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+          val futures = new Array[Future[_]](nthreads)
+          val k = n / 2 / nthreads
+          for (i <- 0 until nthreads) {
+            val firstIdx = i * k
+            val lastIdx = if (i == (nthreads - 1)) n / 2
+            else firstIdx + k
+            futures(i) = ConcurrencyUtils.submit(new Runnable() {
+              override def run(): Unit = {
+                var idx1 = 0
+                var idx2 = 0
+                for (k <- firstIdx until lastIdx) {
+                  idx1 = 2 * k
+                  idx2 = offa + ((twon - idx1) % twon)
+                  a(idx2) = a(offa + idx1)
+                  a(idx2 + 1) = -a(offa + idx1 + 1)
                 }
-              })
-            }
-            try ConcurrencyUtils.waitForCompletion(futures)
-            catch {
-              case ex: InterruptedException =>
-                Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-              case ex: ExecutionException =>
-                Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-            }
+              }
+            })
           }
-          else {
-            var idx1 = 0
-            var idx2 = 0
-            for (k <- 0 until n / 2) {
-              idx1 = 2 * k
-              idx2 = offa + ((twon - idx1) % twon)
-              a(idx2) = a(offa + idx1)
-              a(idx2 + 1) = -a(offa + idx1 + 1)
-            }
+          try ConcurrencyUtils.waitForCompletion(futures)
+          catch {
+            case ex: InterruptedException =>
+              Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
+            case ex: ExecutionException =>
+              Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
           }
-          a(offa + n) = -a(offa + 1)
-          a(offa + 1) = 0
+        }
+        else {
+          var idx1 = 0
+          var idx2 = 0
+          for (k <- 0 until n / 2) {
+            idx1 = 2 * k
+            idx2 = offa + ((twon - idx1) % twon)
+            a(idx2) = a(offa + idx1)
+            a(idx2 + 1) = -a(offa + idx1 + 1)
+          }
+        }
+        a(offa + n) = -a(offa + 1)
+        a(offa + 1) = 0
 
-        case MIXED_RADIX =>
-          rfftf(a, offa)
-          if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
-          var m = 0
-          if (n % 2 == 0) m = n / 2
-          else m = (n + 1) / 2
-          for (k <- 1 until m) {
-            val idx1 = offa + 2 * k
-            val idx2 = offa + twon - 2 * k
-            a(idx1) = -a(idx1)
-            a(idx2 + 1) = -a(idx1)
-            a(idx2) = a(idx1 - 1)
-          }
-          for (k <- 1 until n) {
-            val idx = offa + n - k
-            val tmp = a(idx + 1)
-            a(idx + 1) = a(idx)
-            a(idx) = tmp
-          }
-          a(offa + 1) = 0
+      case MIXED_RADIX =>
+        rfftf(a, offa)
+        if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
+        var m = 0
+        if (n % 2 == 0) m = n / 2
+        else m = (n + 1) / 2
+        for (k <- 1 until m) {
+          val idx1 = offa + 2 * k
+          val idx2 = offa + twon - 2 * k
+          a(idx1) = -a(idx1)
+          a(idx2 + 1) = -a(idx1)
+          a(idx2) = a(idx1 - 1)
+        }
+        for (k <- 1 until n) {
+          val idx = offa + n - k
+          val tmp = a(idx + 1)
+          a(idx + 1) = a(idx)
+          a(idx) = tmp
+        }
+        a(offa + 1) = 0
 
-        case BLUESTEIN =>
-          bluestein_real_full(a, offa, 1)
-          if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, true)
+      case BLUESTEIN =>
+        bluestein_real_full(a, offa, 1)
+        if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, true)
 
-      }
-    }
-  }
-
-  def realInverseFull(a: DoubleLargeArray, offa: Long, scale: Boolean): Unit = {
-    if (!useLargeArrays) if (!a.isLarge && !a.isConstant && offa < Integer.MAX_VALUE) realInverseFull(a.getData, offa.toInt, scale)
-    else throw new IllegalArgumentException("The data array is too big.")
-    else {
-      val twon = 2 * nl
-      plan match {
-        case SPLIT_RADIX =>
-          realInverse2(a, offa, scale)
-          val nthreads = ConcurrencyUtils.getNumberOfThreads
-          if ((nthreads > 1) && (nl / 2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
-            val futures = new Array[Future[_]](nthreads)
-            val k = nl / 2 / nthreads
-            for (i <- 0 until nthreads) {
-              val firstIdx = i * k
-              val lastIdx = if (i == (nthreads - 1)) nl / 2
-              else firstIdx + k
-              futures(i) = ConcurrencyUtils.submit(new Runnable() {
-                override def run(): Unit = {
-                  var idx1 = 0L
-                  var idx2 = 0L
-                  for (k <- firstIdx until lastIdx) {
-                    idx1 = 2 * k
-                    idx2 = offa + ((twon - idx1) % twon)
-                    a.setDouble(idx2, a.getDouble(offa + idx1))
-                    a.setDouble(idx2 + 1, -a.getDouble(offa + idx1 + 1))
-                  }
-                }
-              })
-            }
-            try ConcurrencyUtils.waitForCompletion(futures)
-            catch {
-              case ex: InterruptedException =>
-                Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-              case ex: ExecutionException =>
-                Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-            }
-          }
-          else {
-            var idx1 = 0L
-            var idx2 = 0L
-            for (k <- 0L until nl / 2) {
-              idx1 = 2 * k
-              idx2 = offa + ((twon - idx1) % twon)
-              a.setDouble(idx2, a.getDouble(offa + idx1))
-              a.setDouble(idx2 + 1, -a.getDouble(offa + idx1 + 1))
-            }
-          }
-          a.setDouble(offa + nl, -a.getDouble(offa + 1))
-          a.setDouble(offa + 1, 0)
-
-        case MIXED_RADIX =>
-          rfftf(a, offa)
-          if (scale) CommonUtils.scale(nl, 1.0 / nl, a, offa, false)
-          var m = 0L
-          if (nl % 2 == 0) m = nl / 2
-          else m = (nl + 1) / 2
-          for (k <- 1L until m) {
-            val idx1 = offa + 2 * k
-            val idx2 = offa + twon - 2 * k
-            a.setDouble(idx1, -a.getDouble(idx1))
-            a.setDouble(idx2 + 1, -a.getDouble(idx1))
-            a.setDouble(idx2, a.getDouble(idx1 - 1))
-          }
-          for (k <- 1L until nl) {
-            val idx = offa + nl - k
-            val tmp = a.getDouble(idx + 1)
-            a.setDouble(idx + 1, a.getDouble(idx))
-            a.setDouble(idx, tmp)
-          }
-          a.setDouble(offa + 1, 0)
-
-        case BLUESTEIN =>
-          bluestein_real_full(a, offa, 1)
-          if (scale) CommonUtils.scale(nl, 1.0 / nl, a, offa, true)
-
-      }
     }
   }
 
   protected def realInverse2(a: Array[Double], offa: Int, scale: Boolean): Unit = {
-    if (useLargeArrays) realInverse2(new DoubleLargeArray(a), offa, scale)
-    else {
-      if (n == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          var xi = .0
-          if (n > 4) {
-            CommonUtils.cftfsub(n, a, offa, ip, nw, w)
-            CommonUtils.rftbsub(n, a, offa, nc, w, nw)
-          }
-          else if (n == 4) CommonUtils.cftbsub(n, a, offa, ip, nw, w)
-          xi = a(offa) - a(offa + 1)
-          a(offa) += a(offa + 1)
-          a(offa + 1) = xi
-          if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
+    if (n == 1) return
+    plan match {
+      case SPLIT_RADIX =>
+        var xi = .0
+        if (n > 4) {
+          CommonUtils.cftfsub(n, a, offa, ip, nw, w)
+          CommonUtils.rftbsub(n, a, offa, nc, w, nw)
+        }
+        else if (n == 4) CommonUtils.cftbsub(n, a, offa, ip, nw, w)
+        xi = a(offa) - a(offa + 1)
+        a(offa) += a(offa + 1)
+        a(offa + 1) = xi
+        if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
 
-        case MIXED_RADIX =>
-          rfftf(a, offa)
-          for (k <- n - 1 to 2 by -1) {
-            val idx = offa + k
-            val tmp = a(idx)
-            a(idx) = a(idx - 1)
-            a(idx - 1) = tmp
+      case MIXED_RADIX =>
+        rfftf(a, offa)
+        for (k <- n - 1 to 2 by -1) {
+          val idx = offa + k
+          val tmp = a(idx)
+          a(idx) = a(idx - 1)
+          a(idx - 1) = tmp
+        }
+        if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
+        var m = 0
+        if (n % 2 == 0) {
+          m = n / 2
+          for (i <- 1 until m) {
+            val idx = offa + 2 * i + 1
+            a(idx) = -a(idx)
           }
-          if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
-          var m = 0
-          if (n % 2 == 0) {
-            m = n / 2
-            for (i <- 1 until m) {
-              val idx = offa + 2 * i + 1
-              a(idx) = -a(idx)
-            }
+        }
+        else {
+          m = (n - 1) / 2
+          for (i <- 0 until m) {
+            val idx = offa + 2 * i + 1
+            a(idx) = -a(idx)
           }
-          else {
-            m = (n - 1) / 2
-            for (i <- 0 until m) {
-              val idx = offa + 2 * i + 1
-              a(idx) = -a(idx)
-            }
-          }
+        }
 
-        case BLUESTEIN =>
-          bluestein_real_inverse2(a, offa)
-          if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
+      case BLUESTEIN =>
+        bluestein_real_inverse2(a, offa)
+        if (scale) CommonUtils.scale(n, 1.0 / n, a, offa, false)
 
-      }
-    }
-  }
-
-  protected def realInverse2(a: DoubleLargeArray, offa: Long, scale: Boolean): Unit = {
-    if (!useLargeArrays) if (!a.isLarge && !a.isConstant && offa < Integer.MAX_VALUE) realInverse2(a.getData, offa.toInt, scale)
-    else throw new IllegalArgumentException("The data array is too big.")
-    else {
-      if (nl == 1) return
-      plan match {
-        case SPLIT_RADIX =>
-          var xi = .0
-          if (nl > 4) {
-            CommonUtils.cftfsub(nl, a, offa, ipl, nwl, wl)
-            CommonUtils.rftbsub(nl, a, offa, ncl, wl, nwl)
-          }
-          else if (nl == 4) CommonUtils.cftbsub(nl, a, offa, ipl, nwl, wl)
-          xi = a.getDouble(offa) - a.getDouble(offa + 1)
-          a.setDouble(offa, a.getDouble(offa) + a.getDouble(offa + 1))
-          a.setDouble(offa + 1, xi)
-          if (scale) CommonUtils.scale(nl, 1.0 / nl, a, offa, false)
-
-        case MIXED_RADIX =>
-          rfftf(a, offa)
-          for (k <- nl - 1 to 2 by -1) {
-            val idx = offa + k
-            val tmp = a.getDouble(idx)
-            a.setDouble(idx, a.getDouble(idx - 1))
-            a.setDouble(idx - 1, tmp)
-          }
-          if (scale) CommonUtils.scale(nl, 1.0 / nl, a, offa, false)
-          var m = 0L
-          if (nl % 2 == 0) {
-            m = nl / 2
-            for (i <- 1L until m) {
-              val idx = offa + 2 * i + 1
-              a.setDouble(idx, -a.getDouble(idx))
-            }
-          }
-          else {
-            m = (nl - 1) / 2
-            for (i <- 0L until m) {
-              val idx = offa + 2 * i + 1
-              a.setDouble(idx, -a.getDouble(idx))
-            }
-          }
-
-        case BLUESTEIN =>
-          bluestein_real_inverse2(a, offa)
-          if (scale) CommonUtils.scale(nl, 1.0 / nl, a, offa, false)
-
-      }
     }
   }
 
   /* -------- initializing routines -------- */
+
   /*---------------------------------------------------------
-       cffti: initialization of Complex FFT
-       --------------------------------------------------------*/ private[fft] def cffti(n: Int, offw: Int): Unit = {
+     cffti: initialization of Complex FFT
+     --------------------------------------------------------*/
+
+  private[fft] def cffti(n: Int, offw: Int): Unit = {
     if (n == 1) {
       return
     }
@@ -1154,49 +680,48 @@ final class DoubleFFT_1D(n0: Long) {
     nf = 0
     j = 0
 
-    ???
-//    factorize_loop //todo: labels are not supported
-//    while ( {
-//      true
-//    }) {
-//      j += 1
-//      if (j <= 4) {
-//        ntry = factors(j - 1)
-//      }
-//      else {
-//        ntry += 2
-//      }
-//      do {
-//        {
-//          nq = nll / ntry
-//          nr = nll - ntry * nq
-//          if (nr != 0) {
-//            continue factorize_loop //todo: continue is not supported
-//
-//          }
-//          nf += 1
-//          wtable(offw + nf + 1 + fourn) = ntry
-//          nll = nq
-//          if (ntry == 2 && nf != 1) {
-//            i = 2
-//            while ( {
-//              i <= nf
-//            }) {
-//              ib = nf - i + 2
-//              val idx: Int = ib + fourn
-//              wtable(offw + idx + 1) = wtable(offw + idx)
-//
-//              i += 1
-//            }
-//            wtable(offw + 2 + fourn) = 2
-//          }
-//        }
-//      } while ( {
-//        nll != 1
-//      })
-//      break //todo: break is not supported
-//
-//    }
+    ??? // factorize_loop //todo: labels are not supported
+    while ( {
+      true
+    }) {
+      j += 1
+      if (j <= 4) {
+        ntry = factors(j - 1)
+      }
+      else {
+        ntry += 2
+      }
+      do {
+        {
+          nq = nll / ntry
+          nr = nll - ntry * nq
+          if (nr != 0) {
+            ??? // continue factorize_loop //todo: continue is not supported
+
+          }
+          nf += 1
+          wtable(offw + nf + 1 + fourn) = ntry
+          nll = nq
+          if (ntry == 2 && nf != 1) {
+            i = 2
+            while ( {
+              i <= nf
+            }) {
+              ib = nf - i + 2
+              val idx: Int = ib + fourn
+              wtable(offw + idx + 1) = wtable(offw + idx)
+
+              i += 1
+            }
+            wtable(offw + 2 + fourn) = 2
+          }
+        }
+      } while ( {
+        nll != 1
+      })
+      ??? // break //todo: break is not supported
+
+    }
 
     wtable(offw + fourn) = n
     wtable(offw + 1 + fourn) = nf
@@ -1283,49 +808,48 @@ final class DoubleFFT_1D(n0: Long) {
     nf = 0
     j = 0
 
-    ???
-//    factorize_loop //todo: labels are not supported
-//    while ( {
-//      true
-//    }) {
-//      j += 1
-//      if (j <= 4) {
-//        ntry = factors(j - 1)
-//      }
-//      else {
-//        ntry += 2
-//      }
-//      do {
-//        {
-//          nq = nll / ntry
-//          nr = nll - ntry * nq
-//          if (nr != 0) {
-//            continue factorize_loop //todo: continue is not supported
-//
-//          }
-//          nf += 1
-//          wtable(nf + 1 + fourn) = ntry
-//          nll = nq
-//          if (ntry == 2 && nf != 1) {
-//            i = 2
-//            while ( {
-//              i <= nf
-//            }) {
-//              ib = nf - i + 2
-//              val idx: Int = ib + fourn
-//              wtable(idx + 1) = wtable(idx)
-//
-//              i += 1
-//            }
-//            wtable(2 + fourn) = 2
-//          }
-//        }
-//      } while ( {
-//        nll != 1
-//      })
-//      break //todo: break is not supported
-//
-//    }
+    ??? // factorize_loop //todo: labels are not supported
+    while ( {
+      true
+    }) {
+      j += 1
+      if (j <= 4) {
+        ntry = factors(j - 1)
+      }
+      else {
+        ntry += 2
+      }
+      do {
+        {
+          nq = nll / ntry
+          nr = nll - ntry * nq
+          if (nr != 0) {
+            ??? // continue factorize_loop //todo: continue is not supported
+
+          }
+          nf += 1
+          wtable(nf + 1 + fourn) = ntry
+          nll = nq
+          if (ntry == 2 && nf != 1) {
+            i = 2
+            while ( {
+              i <= nf
+            }) {
+              ib = nf - i + 2
+              val idx: Int = ib + fourn
+              wtable(idx + 1) = wtable(idx)
+
+              i += 1
+            }
+            wtable(2 + fourn) = 2
+          }
+        }
+      } while ( {
+        nll != 1
+      })
+      ??? // break //todo: break is not supported
+
+    }
 
     wtable(fourn) = n
     wtable(1 + fourn) = nf
@@ -1380,135 +904,6 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def cfftil(): Unit = {
-    if (nl == 1) {
-      return
-    }
-    val twon: Long = 2 * nl
-    val fourn: Long = 4 * nl
-    var argh: Double = .0
-    var idot: Long = 0L
-    var ntry: Long = 0
-    var i: Long = 0L
-    var j: Long = 0L
-    var argld: Double = .0
-    var i1: Long = 0L
-    var k1: Long = 0L
-    var l1: Long = 0L
-    var l2: Long = 0L
-    var ib: Long = 0L
-    var fi: Double = .0
-    var ld: Long = 0L
-    var ii: Long = 0L
-    var nf: Long = 0L
-    var ipll: Long = 0L
-    var nl2: Long = 0L
-    var nq: Long = 0L
-    var nr: Long = 0L
-    var arg: Double = .0
-    var ido: Long = 0L
-    var ipm: Long = 0L
-    nl2 = nl
-    nf = 0
-    j = 0
-
-    ???
-//    factorize_loop //todo: labels are not supported
-//    while ( {
-//      true
-//    }) {
-//      j += 1
-//      if (j <= 4) {
-//        ntry = factors((j - 1).toInt)
-//      }
-//      else {
-//        ntry += 2
-//      }
-//      do {
-//        {
-//          nq = nl2 / ntry
-//          nr = nl2 - ntry * nq
-//          if (nr != 0) {
-//            continue factorize_loop //todo: continue is not supported
-//
-//          }
-//          nf += 1
-//          wtablel.setDouble(nf + 1 + fourn, ntry)
-//          nl2 = nq
-//          if (ntry == 2 && nf != 1) {
-//            i = 2
-//            while ( {
-//              i <= nf
-//            }) {
-//              ib = nf - i + 2
-//              val idx: Long = ib + fourn
-//              wtablel.setDouble(idx + 1, wtablel.getDouble(idx))
-//
-//              i += 1
-//            }
-//            wtablel.setDouble(2 + fourn, 2)
-//          }
-//        }
-//      } while ( {
-//        nl2 != 1
-//      })
-//      break //todo: break is not supported
-//
-//    }
-
-    wtablel.setDouble(fourn, nl)
-    wtablel.setDouble(1 + fourn, nf)
-    argh = TWO_PI / nl.toDouble
-    i = 1
-    l1 = 1
-    k1 = 1
-    while ( {
-      k1 <= nf
-    }) {
-      ipll = wtablel.getDouble(k1 + 1 + fourn).toLong
-      ld = 0
-      l2 = l1 * ipll
-      ido = nl / l2
-      idot = ido + ido + 2
-      ipm = ipll - 1
-      j = 1
-      while ( {
-        j <= ipm
-      }) {
-        i1 = i
-        wtablel.setDouble(i - 1 + twon, 1)
-        wtablel.setDouble(i + twon, 0)
-        ld += l1
-        fi = 0
-        argld = ld * argh
-        ii = 4
-        while ( {
-          ii <= idot
-        }) {
-          i += 2
-          fi += 1
-          arg = fi * argld
-          val idx: Long = i + twon
-          wtablel.setDouble(idx - 1, cos(arg))
-          wtablel.setDouble(idx, sin(arg))
-
-          ii += 2
-        }
-        if (ipll > 5) {
-          val idx1: Long = i1 + twon
-          val idx2: Long = i + twon
-          wtablel.setDouble(idx1 - 1, wtablel.getDouble(idx2 - 1))
-          wtablel.setDouble(idx1, wtablel.getDouble(idx2))
-        }
-
-        j += 1
-      }
-      l1 = l2
-
-      k1 += 1
-    }
-  }
-
   private[fft] def rffti(): Unit = {
     if (n == 1) {
       return
@@ -1540,49 +935,48 @@ final class DoubleFFT_1D(n0: Long) {
     nf = 0
     j = 0
 
-    ???
-//    factorize_loop //todo: labels are not supported
-//    while ( {
-//      true
-//    }) {
-//      j += 1
-//      if (j <= 4) {
-//        ntry = factors(j - 1)
-//      }
-//      else {
-//        ntry += 2
-//      }
-//      do {
-//        {
-//          nq = nll / ntry
-//          nr = nll - ntry * nq
-//          if (nr != 0) {
-//            continue factorize_loop //todo: continue is not supported
-//
-//          }
-//          nf += 1
-//          wtable_r(nf + 1 + twon) = ntry
-//          nll = nq
-//          if (ntry == 2 && nf != 1) {
-//            i = 2
-//            while ( {
-//              i <= nf
-//            }) {
-//              ib = nf - i + 2
-//              val idx: Int = ib + twon
-//              wtable_r(idx + 1) = wtable_r(idx)
-//
-//              i += 1
-//            }
-//            wtable_r(2 + twon) = 2
-//          }
-//        }
-//      } while ( {
-//        nll != 1
-//      })
-//      break //todo: break is not supported
-//
-//    }
+    ??? // factorize_loop //todo: labels are not supported
+    while ( {
+      true
+    }) {
+      j += 1
+      if (j <= 4) {
+        ntry = factors(j - 1)
+      }
+      else {
+        ntry += 2
+      }
+      do {
+        {
+          nq = nll / ntry
+          nr = nll - ntry * nq
+          if (nr != 0) {
+            ??? // continue factorize_loop //todo: continue is not supported
+
+          }
+          nf += 1
+          wtable_r(nf + 1 + twon) = ntry
+          nll = nq
+          if (ntry == 2 && nf != 1) {
+            i = 2
+            while ( {
+              i <= nf
+            }) {
+              ib = nf - i + 2
+              val idx: Int = ib + twon
+              wtable_r(idx + 1) = wtable_r(idx)
+
+              i += 1
+            }
+            wtable_r(2 + twon) = 2
+          }
+        }
+      } while ( {
+        nll != 1
+      })
+      ??? // break //todo: break is not supported
+
+    }
 
     wtable_r(twon) = n
     wtable_r(1 + twon) = nf
@@ -1633,129 +1027,6 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def rfftil(): Unit = {
-    if (nl == 1) {
-      return
-    }
-    val twon: Long = 2 * nl
-    var argh: Double = .0
-    var ntry: Long = 0
-    var i: Long = 0L
-    var j: Long = 0L
-    var argld: Double = .0
-    var k1: Long = 0L
-    var l1: Long = 0L
-    var l2: Long = 0L
-    var ib: Long = 0L
-    var fi: Double = .0
-    var ld: Long = 0L
-    var ii: Long = 0L
-    var nf: Long = 0L
-    var ipll: Long = 0L
-    var nl2: Long = 0L
-    var is: Long = 0L
-    var nq: Long = 0L
-    var nr: Long = 0L
-    var arg: Double = .0
-    var ido: Long = 0L
-    var ipm: Long = 0L
-    var nfm1: Long = 0L
-    nl2 = nl
-    nf = 0
-    j = 0
-
-//    factorize_loop //todo: labels are not supported
-//    while ( {
-//      true
-//    }) {
-//      j += 1
-//      if (j <= 4) {
-//        ntry = factors((j - 1).toInt)
-//      }
-//      else {
-//        ntry += 2
-//      }
-//      do {
-//        {
-//          nq = nl2 / ntry
-//          nr = nl2 - ntry * nq
-//          if (nr != 0) {
-//            continue factorize_loop //todo: continue is not supported
-//
-//          }
-//          nf += 1
-//          wtable_rl.setDouble(nf + 1 + twon, ntry)
-//          nl2 = nq
-//          if (ntry == 2 && nf != 1) {
-//            i = 2
-//            while ( {
-//              i <= nf
-//            }) {
-//              ib = nf - i + 2
-//              val idx: Long = ib + twon
-//              wtable_rl.setDouble(idx + 1, wtable_rl.getDouble(idx))
-//
-//              i += 1
-//            }
-//            wtable_rl.setDouble(2 + twon, 2)
-//          }
-//        }
-//      } while ( {
-//        nl2 != 1
-//      })
-//      break //todo: break is not supported
-//
-//    }
-
-    wtable_rl.setDouble(twon, nl)
-    wtable_rl.setDouble(1 + twon, nf)
-    argh = TWO_PI / (nl).toDouble
-    is = 0
-    nfm1 = nf - 1
-    l1 = 1
-    if (nfm1 == 0) {
-      return
-    }
-    k1 = 1
-    while ( {
-      k1 <= nfm1
-    }) {
-      ipll = wtable_rl.getDouble(k1 + 1 + twon).toLong
-      ld = 0
-      l2 = l1 * ipll
-      ido = nl / l2
-      ipm = ipll - 1
-      j = 1
-      while ( {
-        j <= ipm
-      }) {
-        ld += l1
-        i = is
-        argld = ld.toDouble * argh
-        fi = 0
-        ii = 3
-        while ( {
-          ii <= ido
-        }) {
-          i += 2
-          fi += 1
-          arg = fi * argld
-          val idx: Long = i + nl
-          wtable_rl.setDouble(idx - 2, cos(arg))
-          wtable_rl.setDouble(idx - 1, sin(arg))
-
-          ii += 2
-        }
-        is += ido
-
-        j += 1
-      }
-      l1 = l2
-
-      k1 += 1
-    }
-  }
-
   private def bluesteini(): Unit = {
     var k: Int = 0
     var arg: Double = .0
@@ -1786,50 +1057,6 @@ final class DoubleFFT_1D(n0: Long) {
       i += 2
     }
     CommonUtils.cftbsub(2 * nBluestein, bk2, 0, ip, nw, w)
-  }
-
-  private def bluesteinil(): Unit = {
-    var k: Long = 0
-    var arg: Double = .0
-    val pi_n: Double = PI / nl
-    bk1l.setDouble(0, 1)
-    bk1l.setDouble(1, 0)
-
-    {
-      var i: Int = 1
-      while ( {
-        i < nl
-      }) {
-        k += 2 * i - 1
-        if (k >= 2 * nl) {
-          k -= 2 * nl
-        }
-        arg = pi_n * k
-        bk1l.setDouble(2 * i, cos(arg))
-        bk1l.setDouble(2 * i + 1, sin(arg))
-
-        i += 1
-      }
-    }
-
-    val scale: Double = 1.0 / nBluesteinl
-    bk2l.setDouble(0, bk1l.getDouble(0) * scale)
-    bk2l.setDouble(1, bk1l.getDouble(1) * scale)
-
-    {
-      var i: Int = 2
-      while ( {
-        i < 2 * nl
-      }) {
-        bk2l.setDouble(i, bk1l.getDouble(i) * scale)
-        bk2l.setDouble(i + 1, bk1l.getDouble(i + 1) * scale)
-        bk2l.setDouble(2 * nBluesteinl - i, bk2l.getDouble(i))
-        bk2l.setDouble(2 * nBluesteinl - i + 1, bk2l.getDouble(i + 1))
-
-        i += 2
-      }
-    }
-    CommonUtils.cftbsub(2 * nBluesteinl, bk2l, 0, ipl, nwl, wl)
   }
 
   private def bluestein_complex(a: Array[Double], offa: Int, isign: Int): Unit = {
@@ -2029,203 +1256,6 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private def bluestein_complex(a: DoubleLargeArray, offa: Long, isign: Int): Unit = {
-    val ak: DoubleLargeArray = new DoubleLargeArray(2 * nBluesteinl)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
-      var nthreads: Int = 2
-      if ((threads >= 4) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
-        nthreads = 4
-      }
-      val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
-      var k: Long = nl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val idx3: Long = offa + idx1
-                val idx4: Long = offa + idx2
-                ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1) - a.getDouble(idx4) * bk1l.getDouble(idx2))
-                ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2) + a.getDouble(idx4) * bk1l.getDouble(idx1))
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val idx3: Long = offa + idx1
-                val idx4: Long = offa + idx2
-                ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1) + a.getDouble(idx4) * bk1l.getDouble(idx2))
-                ak.setDouble(idx2, -(a.getDouble(idx3)) * bk1l.getDouble(idx2) + a.getDouble(idx4) * bk1l.getDouble(idx1))
-              }
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-      CommonUtils.cftbsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      k = nBluesteinl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nBluesteinl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val im: Double = -(ak.getDouble(idx1)) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-                ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) + ak.getDouble(idx2) * bk2l.getDouble(idx2))
-                ak.setDouble(idx2, im)
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val im: Double = ak.getDouble(idx1) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-                ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) - ak.getDouble(idx2) * bk2l.getDouble(idx2))
-                ak.setDouble(idx2, im)
-              }
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-      CommonUtils.cftfsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      k = nl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val idx3: Long = offa + idx1
-                val idx4: Long = offa + idx2
-                a.setDouble(idx3, bk1l.getDouble(idx1) * ak.getDouble(idx1) - bk1l.getDouble(idx2) * ak.getDouble(idx2))
-                a.setDouble(idx4, bk1l.getDouble(idx2) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val idx3: Long = offa + idx1
-                val idx4: Long = offa + idx2
-                a.setDouble(idx3, bk1l.getDouble(idx1) * ak.getDouble(idx1) + bk1l.getDouble(idx2) * ak.getDouble(idx2))
-                a.setDouble(idx4, -(bk1l.getDouble(idx2)) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-              }
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-    }
-    else {
-      if (isign > 0) {
-        for (i <- 0L until nl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val idx3: Long = offa + idx1
-          val idx4: Long = offa + idx2
-          ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1) - a.getDouble(idx4) * bk1l.getDouble(idx2))
-          ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2) + a.getDouble(idx4) * bk1l.getDouble(idx1))
-        }
-      }
-      else {
-        for (i <- 0L until nl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val idx3: Long = offa + idx1
-          val idx4: Long = offa + idx2
-          ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1) + a.getDouble(idx4) * bk1l.getDouble(idx2))
-          ak.setDouble(idx2, -(a.getDouble(idx3)) * bk1l.getDouble(idx2) + a.getDouble(idx4) * bk1l.getDouble(idx1))
-        }
-      }
-      CommonUtils.cftbsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      if (isign > 0) {
-        for (i <- 0L until nBluesteinl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val im: Double = -(ak.getDouble(idx1)) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-          ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) + ak.getDouble(idx2) * bk2l.getDouble(idx2))
-          ak.setDouble(idx2, im)
-        }
-      }
-      else {
-        for (i <- 0L until nBluesteinl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val im: Double = ak.getDouble(idx1) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-          ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) - ak.getDouble(idx2) * bk2l.getDouble(idx2))
-          ak.setDouble(idx2, im)
-        }
-      }
-      CommonUtils.cftfsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      if (isign > 0) {
-        for (i <- 0L until nl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val idx3: Long = offa + idx1
-          val idx4: Long = offa + idx2
-          a.setDouble(idx3, bk1l.getDouble(idx1) * ak.getDouble(idx1) - bk1l.getDouble(idx2) * ak.getDouble(idx2))
-          a.setDouble(idx4, bk1l.getDouble(idx2) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-        }
-      }
-      else {
-        for (i <- 0L until nl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val idx3: Long = offa + idx1
-          val idx4: Long = offa + idx2
-          a.setDouble(idx3, bk1l.getDouble(idx1) * ak.getDouble(idx1) + bk1l.getDouble(idx2) * ak.getDouble(idx2))
-          a.setDouble(idx4, -(bk1l.getDouble(idx2)) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-        }
-      }
-    }
-  }
-
   private def bluestein_real_full(a: Array[Double], offa: Int, isign: Int): Unit = {
     val ak: Array[Double] = new Array[Double](2 * nBluestein)
     val threads: Int = ConcurrencyUtils.getNumberOfThreads
@@ -2411,191 +1441,6 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private def bluestein_real_full(a: DoubleLargeArray, offa: Long, isign: Long): Unit = {
-    val ak: DoubleLargeArray = new DoubleLargeArray(2 * nBluesteinl)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
-      var nthreads: Int = 2
-      if ((threads >= 4) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
-        nthreads = 4
-      }
-      val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
-      var k: Long = nl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val idx3: Long = offa + i
-                ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1))
-                ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2))
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val idx3: Long = offa + i
-                ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1))
-                ak.setDouble(idx2, -(a.getDouble(idx3)) * bk1l.getDouble(idx2))
-              }
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-      CommonUtils.cftbsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      k = nBluesteinl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nBluesteinl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val im: Double = -(ak.getDouble(idx1)) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-                ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) + ak.getDouble(idx2) * bk2l.getDouble(idx2))
-                ak.setDouble(idx2, im)
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                val im: Double = ak.getDouble(idx1) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-                ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) - ak.getDouble(idx2) * bk2l.getDouble(idx2))
-                ak.setDouble(idx2, im)
-              }
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-      CommonUtils.cftfsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      k = nl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                a.setDouble(offa + idx1, bk1l.getDouble(idx1) * ak.getDouble(idx1) - bk1l.getDouble(idx2) * ak.getDouble(idx2))
-                a.setDouble(offa + idx2, bk1l.getDouble(idx2) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Long = 2 * i
-                val idx2: Long = idx1 + 1
-                a.setDouble(offa + idx1, bk1l.getDouble(idx1) * ak.getDouble(idx1) + bk1l.getDouble(idx2) * ak.getDouble(idx2))
-                a.setDouble(offa + idx2, -(bk1l.getDouble(idx2)) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-              }
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-    }
-    else {
-      if (isign > 0) {
-        for (i <- 0L until nl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val idx3: Long = offa + i
-          ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1))
-          ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2))
-        }
-      }
-      else {
-        for (i <- 0L until nl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val idx3: Long = offa + i
-          ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1))
-          ak.setDouble(idx2, -(a.getDouble(idx3)) * bk1l.getDouble(idx2))
-        }
-      }
-      CommonUtils.cftbsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      if (isign > 0) {
-        for (i <- 0L until nBluesteinl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val im: Double = -(ak.getDouble(idx1)) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-          ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) + ak.getDouble(idx2) * bk2l.getDouble(idx2))
-          ak.setDouble(idx2, im)
-        }
-      }
-      else {
-        for (i <- 0L until nBluesteinl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          val im: Double = ak.getDouble(idx1) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-          ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) - ak.getDouble(idx2) * bk2l.getDouble(idx2))
-          ak.setDouble(idx2, im)
-        }
-      }
-      CommonUtils.cftfsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      if (isign > 0) {
-        for (i <- 0L until nl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          a.setDouble(offa + idx1, bk1l.getDouble(idx1) * ak.getDouble(idx1) - bk1l.getDouble(idx2) * ak.getDouble(idx2))
-          a.setDouble(offa + idx2, bk1l.getDouble(idx2) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-        }
-      }
-      else {
-        for (i <- 0L until nl) {
-          val idx1: Long = 2 * i
-          val idx2: Long = idx1 + 1
-          a.setDouble(offa + idx1, bk1l.getDouble(idx1) * ak.getDouble(idx1) + bk1l.getDouble(idx2) * ak.getDouble(idx2))
-          a.setDouble(offa + idx2, -(bk1l.getDouble(idx2)) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-        }
-      }
-    }
-  }
-
   private def bluestein_real_forward(a: Array[Double], offa: Int): Unit = {
     val ak: Array[Double] = new Array[Double](2 * nBluestein)
     val threads: Int = ConcurrencyUtils.getNumberOfThreads
@@ -2701,114 +1546,6 @@ final class DoubleFFT_1D(n0: Long) {
         a(offa + idx2) = -(bk1(idx2)) * ak(idx1) + bk1(idx1) * ak(idx2)
       }
       a(offa + n - 1) = bk1(n - 1) * ak(n - 1) + bk1(n) * ak(n)
-    }
-  }
-
-  private def bluestein_real_forward(a: DoubleLargeArray, offa: Long): Unit = {
-    val ak: DoubleLargeArray = new DoubleLargeArray(2 * nBluesteinl)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
-      var nthreads: Int = 2
-      if ((threads >= 4) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
-        nthreads = 4
-      }
-      val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
-      var k: Long = nl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Long = 2 * i
-              val idx2: Long = idx1 + 1
-              val idx3: Long = offa + i
-              ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1))
-              ak.setDouble(idx2, -(a.getDouble(idx3)) * bk1l.getDouble(idx2))
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-      CommonUtils.cftbsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      k = nBluesteinl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nBluesteinl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Long = 2 * i
-              val idx2: Long = idx1 + 1
-              val im: Double = ak.getDouble(idx1) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-              ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) - ak.getDouble(idx2) * bk2l.getDouble(idx2))
-              ak.setDouble(idx2, im)
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-    }
-    else {
-      for (i <- 0L until nl) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        val idx3: Long = offa + i
-        ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1))
-        ak.setDouble(idx2, -(a.getDouble(idx3)) * bk1l.getDouble(idx2))
-      }
-      CommonUtils.cftbsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      for (i <- 0L until nBluesteinl) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        val im: Double = ak.getDouble(idx1) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-        ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) - ak.getDouble(idx2) * bk2l.getDouble(idx2))
-        ak.setDouble(idx2, im)
-      }
-    }
-    CommonUtils.cftfsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-    if (nl % 2 == 0) {
-      a.setDouble(offa, bk1l.getDouble(0) * ak.getDouble(0) + bk1l.getDouble(1) * ak.getDouble(1))
-      a.setDouble(offa + 1, bk1l.getDouble(nl) * ak.getDouble(nl) + bk1l.getDouble(nl + 1) * ak.getDouble(nl + 1))
-      for (i <- 1L until nl / 2) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        a.setDouble(offa + idx1, bk1l.getDouble(idx1) * ak.getDouble(idx1) + bk1l.getDouble(idx2) * ak.getDouble(idx2))
-        a.setDouble(offa + idx2, -(bk1l.getDouble(idx2)) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-      }
-    }
-    else {
-      a.setDouble(offa, bk1l.getDouble(0) * ak.getDouble(0) + bk1l.getDouble(1) * ak.getDouble(1))
-      a.setDouble(offa + 1, -(bk1l.getDouble(nl)) * ak.getDouble(nl - 1) + bk1l.getDouble(nl - 1) * ak.getDouble(nl))
-      for (i <- 1L until (nl - 1) / 2) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        a.setDouble(offa + idx1, bk1l.getDouble(idx1) * ak.getDouble(idx1) + bk1l.getDouble(idx2) * ak.getDouble(idx2))
-        a.setDouble(offa + idx2, -(bk1l.getDouble(idx2)) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-      }
-      a.setDouble(offa + nl - 1, bk1l.getDouble(nl - 1) * ak.getDouble(nl - 1) + bk1l.getDouble(nl) * ak.getDouble(nl))
     }
   }
 
@@ -2941,135 +1678,6 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private def bluestein_real_inverse(a: DoubleLargeArray, offa: Long): Unit = {
-    val ak: DoubleLargeArray = new DoubleLargeArray(2 * nBluesteinl)
-    if (nl % 2 == 0) {
-      ak.setDouble(0, a.getDouble(offa) * bk1l.getDouble(0))
-      ak.setDouble(1, a.getDouble(offa) * bk1l.getDouble(1))
-      for (i <- 1L until nl / 2) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        val idx3: Long = offa + idx1
-        val idx4: Long = offa + idx2
-        ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1) - a.getDouble(idx4) * bk1l.getDouble(idx2))
-        ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2) + a.getDouble(idx4) * bk1l.getDouble(idx1))
-      }
-      ak.setDouble(nl, a.getDouble(offa + 1) * bk1l.getDouble(nl))
-      ak.setDouble(nl + 1, a.getDouble(offa + 1) * bk1l.getDouble(nl + 1))
-      for (i <- nl / 2 + 1 until nl) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        val idx3: Long = offa + 2 * nl - idx1
-        val idx4: Long = idx3 + 1
-        ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1) + a.getDouble(idx4) * bk1l.getDouble(idx2))
-        ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2) - a.getDouble(idx4) * bk1l.getDouble(idx1))
-      }
-    }
-    else {
-      ak.setDouble(0, a.getDouble(offa) * bk1l.getDouble(0))
-      ak.setDouble(1, a.getDouble(offa) * bk1l.getDouble(1))
-      for (i <- 1L until (nl - 1) / 2) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        val idx3: Long = offa + idx1
-        val idx4: Long = offa + idx2
-        ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1) - a.getDouble(idx4) * bk1l.getDouble(idx2))
-        ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2) + a.getDouble(idx4) * bk1l.getDouble(idx1))
-      }
-      ak.setDouble(nl - 1, a.getDouble(offa + nl - 1) * bk1l.getDouble(nl - 1) - a.getDouble(offa + 1) * bk1l.getDouble(nl))
-      ak.setDouble(nl, a.getDouble(offa + nl - 1) * bk1l.getDouble(nl) + a.getDouble(offa + 1) * bk1l.getDouble(nl - 1))
-      ak.setDouble(nl + 1, a.getDouble(offa + nl - 1) * bk1l.getDouble(nl + 1) + a.getDouble(offa + 1) * bk1l.getDouble(nl + 2))
-      ak.setDouble(nl + 2, a.getDouble(offa + nl - 1) * bk1l.getDouble(nl + 2) - a.getDouble(offa + 1) * bk1l.getDouble(nl + 1))
-      for (i <- (nl - 1) / 2 + 2 until nl) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        val idx3: Long = offa + 2 * nl - idx1
-        val idx4: Long = idx3 + 1
-        ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1) + a.getDouble(idx4) * bk1l.getDouble(idx2))
-        ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2) - a.getDouble(idx4) * bk1l.getDouble(idx1))
-      }
-    }
-    CommonUtils.cftbsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
-      var nthreads: Int = 2
-      if ((threads >= 4) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
-        nthreads = 4
-      }
-      val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
-      var k: Long = nBluesteinl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nBluesteinl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Long = 2 * i
-              val idx2: Long = idx1 + 1
-              val im: Double = -(ak.getDouble(idx1)) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-              ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) + ak.getDouble(idx2) * bk2l.getDouble(idx2))
-              ak.setDouble(idx2, im)
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-      CommonUtils.cftfsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      k = nl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Long = 2 * i
-              val idx2: Long = idx1 + 1
-              a.setDouble(offa + i, bk1l.getDouble(idx1) * ak.getDouble(idx1) - bk1l.getDouble(idx2) * ak.getDouble(idx2))
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-    }
-    else {
-      for (i <- 0L until nBluesteinl) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        val im: Double = -(ak.getDouble(idx1)) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-        ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) + ak.getDouble(idx2) * bk2l.getDouble(idx2))
-        ak.setDouble(idx2, im)
-      }
-      CommonUtils.cftfsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      for (i <- 0L until nl) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        a.setDouble(offa + i, bk1l.getDouble(idx1) * ak.getDouble(idx1) - bk1l.getDouble(idx2) * ak.getDouble(idx2))
-      }
-    }
-  }
-
   private def bluestein_real_inverse2(a: Array[Double], offa: Int): Unit = {
     val ak: Array[Double] = new Array[Double](2 * nBluestein)
     val threads: Int = ConcurrencyUtils.getNumberOfThreads
@@ -3178,117 +1786,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private def bluestein_real_inverse2(a: DoubleLargeArray, offa: Long): Unit = {
-    val ak: DoubleLargeArray = new DoubleLargeArray(2 * nBluesteinl)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
-      var nthreads: Int = 2
-      if ((threads >= 4) && (nl > CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
-        nthreads = 4
-      }
-      val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
-      var k: Long = nl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Long = 2 * i
-              val idx2: Long = idx1 + 1
-              val idx3: Long = offa + i
-              ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1))
-              ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2))
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-      CommonUtils.cftbsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      k = nBluesteinl / nthreads
-      for (i <- 0 until nthreads) {
-        val firstIdx: Long = i * k
-        val lastIdx: Long = if ((i == (nthreads - 1))) {
-          nBluesteinl
-        }
-        else {
-          firstIdx + k
-        }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Long = 2 * i
-              val idx2: Long = idx1 + 1
-              val im: Double = -(ak.getDouble(idx1)) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-              ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) + ak.getDouble(idx2) * bk2l.getDouble(idx2))
-              ak.setDouble(idx2, im)
-            }
-          }
-        })
-      }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
-    }
-    else {
-      for (i <- 0L until nl) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        val idx3: Long = offa + i
-        ak.setDouble(idx1, a.getDouble(idx3) * bk1l.getDouble(idx1))
-        ak.setDouble(idx2, a.getDouble(idx3) * bk1l.getDouble(idx2))
-      }
-      CommonUtils.cftbsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-      for (i <- 0L until nBluesteinl) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        val im: Double = -(ak.getDouble(idx1)) * bk2l.getDouble(idx2) + ak.getDouble(idx2) * bk2l.getDouble(idx1)
-        ak.setDouble(idx1, ak.getDouble(idx1) * bk2l.getDouble(idx1) + ak.getDouble(idx2) * bk2l.getDouble(idx2))
-        ak.setDouble(idx2, im)
-      }
-    }
-    CommonUtils.cftfsub(2 * nBluesteinl, ak, 0, ipl, nwl, wl)
-    if (nl % 2 == 0) {
-      a.setDouble(offa, bk1l.getDouble(0) * ak.getDouble(0) - bk1l.getDouble(1) * ak.getDouble(1))
-      a.setDouble(offa + 1, bk1l.getDouble(nl) * ak.getDouble(nl) - bk1l.getDouble(nl + 1) * ak.getDouble(nl + 1))
-      for (i <- 1L until nl / 2) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        a.setDouble(offa + idx1, bk1l.getDouble(idx1) * ak.getDouble(idx1) - bk1l.getDouble(idx2) * ak.getDouble(idx2))
-        a.setDouble(offa + idx2, bk1l.getDouble(idx2) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-      }
-    }
-    else {
-      a.setDouble(offa, bk1l.getDouble(0) * ak.getDouble(0) - bk1l.getDouble(1) * ak.getDouble(1))
-      a.setDouble(offa + 1, bk1l.getDouble(nl) * ak.getDouble(nl - 1) + bk1l.getDouble(nl - 1) * ak.getDouble(nl))
-      for (i <- 1L until (nl - 1) / 2) {
-        val idx1: Long = 2 * i
-        val idx2: Long = idx1 + 1
-        a.setDouble(offa + idx1, bk1l.getDouble(idx1) * ak.getDouble(idx1) - bk1l.getDouble(idx2) * ak.getDouble(idx2))
-        a.setDouble(offa + idx2, bk1l.getDouble(idx2) * ak.getDouble(idx1) + bk1l.getDouble(idx1) * ak.getDouble(idx2))
-      }
-      a.setDouble(offa + nl - 1, bk1l.getDouble(nl - 1) * ak.getDouble(nl - 1) - bk1l.getDouble(nl) * ak.getDouble(nl))
-    }
-  }
-
   /*---------------------------------------------------------
      rfftf1: further processing of Real forward FFT
-     --------------------------------------------------------*/ private[fft] def rfftf(a: Array[Double], offa: Int): Unit = {
+     --------------------------------------------------------*/
+  private[fft] def rfftf(a: Array[Double], offa: Int): Unit = {
     if (n == 1) return
     var l1 = 0
     var l2 = 0
@@ -3348,69 +1849,10 @@ final class DoubleFFT_1D(n0: Long) {
     System.arraycopy(ch, 0, a, offa, n)
   }
 
-  private[fft] def rfftf(a: DoubleLargeArray, offa: Long): Unit = {
-    if (nl == 1) return
-    var l1 = 0L
-    var l2 = 0L
-    var na = 0L
-    var kh = 0L
-    var nf = 0L
-    var iw = 0L
-    var ido = 0L
-    var idl1 = 0L
-    var ipll = 0
-    val ch = new DoubleLargeArray(nl)
-    val twon = 2 * nl
-    nf = wtable_rl.getDouble(1 + twon).toLong
-    na = 1
-    l2 = nl
-    iw = twon - 1
-    for (k1 <- 1L to nf) {
-      kh = nf - k1
-      ipll = wtable_rl.getDouble(kh + 2 + twon).toInt
-      l1 = l2 / ipll
-      ido = nl / l2
-      idl1 = ido * l1
-      iw -= (ipll - 1) * ido
-      na = 1 - na
-      ipll match {
-        case 2 =>
-          if (na == 0) radf2(ido, l1, a, offa, ch, 0, iw)
-          else radf2(ido, l1, ch, 0, a, offa, iw)
-
-        case 3 =>
-          if (na == 0) radf3(ido, l1, a, offa, ch, 0, iw)
-          else radf3(ido, l1, ch, 0, a, offa, iw)
-
-        case 4 =>
-          if (na == 0) radf4(ido, l1, a, offa, ch, 0, iw)
-          else radf4(ido, l1, ch, 0, a, offa, iw)
-
-        case 5 =>
-          if (na == 0) radf5(ido, l1, a, offa, ch, 0, iw)
-          else radf5(ido, l1, ch, 0, a, offa, iw)
-
-        case _ =>
-          if (ido == 1) na = 1 - na
-          if (na == 0) {
-            radfg(ido, ipll, l1, idl1, a, offa, ch, 0, iw)
-            na = 1
-          }
-          else {
-            radfg(ido, ipll, l1, idl1, ch, 0, a, offa, iw)
-            na = 0
-          }
-
-      }
-      l2 = l1
-    }
-    if (na == 1) return
-    LargeArrayUtils.arraycopy(ch, 0, a, offa, nl)
-  }
-
   /*---------------------------------------------------------
    rfftb1: further processing of Real backward FFT
-   --------------------------------------------------------*/ private[fft] def rfftb(a: Array[Double], offa: Int): Unit = {
+   --------------------------------------------------------*/
+  private[fft] def rfftb(a: Array[Double], offa: Int): Unit = {
     if (n == 1) return
     var l1 = 0
     var l2 = 0
@@ -3465,64 +1907,10 @@ final class DoubleFFT_1D(n0: Long) {
     System.arraycopy(ch, 0, a, offa, n)
   }
 
-  private[fft] def rfftb(a: DoubleLargeArray, offa: Long): Unit = {
-    if (nl == 1) return
-    var l1 = 0L
-    var l2 = 0L
-    var na = 0L
-    var nf = 0L
-    var iw = 0L
-    var ido = 0L
-    var idl1 = 0L
-    var ipll = 0
-    val ch = new DoubleLargeArray(nl)
-    val twon = 2 * nl
-    nf = wtable_rl.getDouble(1 + twon).toLong
-    na = 0
-    l1 = 1
-    iw = nl
-    for (k1 <- 1L to nf) {
-      ipll = wtable_rl.getDouble(k1 + 1 + twon).toInt
-      l2 = ipll * l1
-      ido = nl / l2
-      idl1 = ido * l1
-      ipll match {
-        case 2 =>
-          if (na == 0) radb2(ido, l1, a, offa, ch, 0, iw)
-          else radb2(ido, l1, ch, 0, a, offa, iw)
-          na = 1 - na
-
-        case 3 =>
-          if (na == 0) radb3(ido, l1, a, offa, ch, 0, iw)
-          else radb3(ido, l1, ch, 0, a, offa, iw)
-          na = 1 - na
-
-        case 4 =>
-          if (na == 0) radb4(ido, l1, a, offa, ch, 0, iw)
-          else radb4(ido, l1, ch, 0, a, offa, iw)
-          na = 1 - na
-
-        case 5 =>
-          if (na == 0) radb5(ido, l1, a, offa, ch, 0, iw)
-          else radb5(ido, l1, ch, 0, a, offa, iw)
-          na = 1 - na
-
-        case _ =>
-          if (na == 0) radbg(ido, ipll, l1, idl1, a, offa, ch, 0, iw)
-          else radbg(ido, ipll, l1, idl1, ch, 0, a, offa, iw)
-          if (ido == 1) na = 1 - na
-
-      }
-      l1 = l2
-      iw += (ipll - 1) * ido
-    }
-    if (na == 0) return
-    LargeArrayUtils.arraycopy(ch, 0, a, offa, nl)
-  }
-
   /*-------------------------------------------------
    radf2: Real FFT's forward processing of factor 2
-   -------------------------------------------------*/ private[fft] def radf2(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+   -------------------------------------------------*/
+  private[fft] def radf2(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     var i = 0
     var ic = 0
     var idx0 = 0
@@ -3593,80 +1981,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def radf2(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    var i = 0L
-    var ic = 0L
-    var idx0 = 0L
-    var idx1 = 0L
-    var idx2 = 0L
-    var idx3 = 0L
-    var idx4 = 0L
-    var t1i = .0
-    var t1r = .0
-    var w1r = .0
-    var w1i = .0
-    var iw1 = 0L
-    iw1 = offset
-    idx0 = l1 * ido
-    idx1 = 2 * ido
-    for (k <- 0L until l1) {
-      val oidx1 = out_off + k * idx1
-      val oidx2 = oidx1 + idx1 - 1
-      val iidx1 = in_off + k * ido
-      val iidx2 = iidx1 + idx0
-      val i1r = in.getDouble(iidx1)
-      val i2r = in.getDouble(iidx2)
-      out.setDouble(oidx1, i1r + i2r)
-      out.setDouble(oidx2, i1r - i2r)
-    }
-    if (ido < 2) return
-    if (ido != 2) {
-      for (k <- 0L until l1) {
-        idx1 = k * ido
-        idx2 = 2 * idx1
-        idx3 = idx2 + ido
-        idx4 = idx1 + idx0
-        i = 2
-        while ( {
-          i < ido
-        }) {
-          ic = ido - i
-          val widx1 = i - 1 + iw1
-          val oidx1 = out_off + i + idx2
-          val oidx2 = out_off + ic + idx3
-          val iidx1 = in_off + i + idx1
-          val iidx2 = in_off + i + idx4
-          val a1i = in.getDouble(iidx1 - 1)
-          val a1r = in.getDouble(iidx1)
-          val a2i = in.getDouble(iidx2 - 1)
-          val a2r = in.getDouble(iidx2)
-          w1r = wtable_rl.getDouble(widx1 - 1)
-          w1i = wtable_rl.getDouble(widx1)
-          t1r = w1r * a2i + w1i * a2r
-          t1i = w1r * a2r - w1i * a2i
-          out.setDouble(oidx1, a1r + t1i)
-          out.setDouble(oidx1 - 1, a1i + t1r)
-          out.setDouble(oidx2, t1i - a1r)
-          out.setDouble(oidx2 - 1, a1i - t1r)
-
-          i += 2
-        }
-      }
-      if (ido % 2 == 1) return
-    }
-    idx2 = 2 * idx1
-    for (k <- 0L until l1) {
-      idx1 = k * ido
-      val oidx1 = out_off + idx2 + ido
-      val iidx1 = in_off + ido - 1 + idx1
-      out.setDouble(oidx1, -in.getDouble(iidx1 + idx0))
-      out.setDouble(oidx1 - 1, in.getDouble(iidx1))
-    }
-  }
-
   /*-------------------------------------------------
    radb2: Real FFT's backward processing of factor 2
-   -------------------------------------------------*/ private[fft] def radb2(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+   -------------------------------------------------*/
+  private[fft] def radb2(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     var i = 0
     var ic = 0
     var t1i = .0
@@ -3735,78 +2053,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def radb2(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    var i = 0L
-    var ic = 0L
-    var t1i = .0
-    var t1r = .0
-    var w1r = .0
-    var w1i = .0
-    val iw1 = offset
-    val idx0 = l1 * ido
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 2 * idx1
-      val idx3 = idx2 + ido
-      val oidx1 = out_off + idx1
-      val iidx1 = in_off + idx2
-      val iidx2 = in_off + ido - 1 + idx3
-      val i1r = in.getDouble(iidx1)
-      val i2r = in.getDouble(iidx2)
-      out.setDouble(oidx1, i1r + i2r)
-      out.setDouble(oidx1 + idx0, i1r - i2r)
-    }
-    if (ido < 2) return
-    if (ido != 2) {
-      for (k <- 0L until l1) {
-        val idx1 = k * ido
-        val idx2 = 2 * idx1
-        val idx3 = idx2 + ido
-        val idx4 = idx1 + idx0
-        i = 2
-        while ( {
-          i < ido
-        }) {
-          ic = ido - i
-          val idx5 = i - 1 + iw1
-          val idx6 = out_off + i
-          val idx7 = in_off + i
-          val idx8 = in_off + ic
-          w1r = wtable_rl.getDouble(idx5 - 1)
-          w1i = wtable_rl.getDouble(idx5)
-          val iidx1 = idx7 + idx2
-          val iidx2 = idx8 + idx3
-          val oidx1 = idx6 + idx1
-          val oidx2 = idx6 + idx4
-          t1r = in.getDouble(iidx1 - 1) - in.getDouble(iidx2 - 1)
-          t1i = in.getDouble(iidx1) + in.getDouble(iidx2)
-          val i1i = in.getDouble(iidx1)
-          val i1r = in.getDouble(iidx1 - 1)
-          val i2i = in.getDouble(iidx2)
-          val i2r = in.getDouble(iidx2 - 1)
-          out.setDouble(oidx1 - 1, i1r + i2r)
-          out.setDouble(oidx1, i1i - i2i)
-          out.setDouble(oidx2 - 1, w1r * t1r - w1i * t1i)
-          out.setDouble(oidx2, w1r * t1i + w1i * t1r)
-
-          i += 2
-        }
-      }
-      if (ido % 2 == 1) return
-    }
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 2 * idx1
-      val oidx1 = out_off + ido - 1 + idx1
-      val iidx1 = in_off + idx2 + ido
-      out.setDouble(oidx1, 2 * in.getDouble(iidx1 - 1))
-      out.setDouble(oidx1 + idx0, -2 * in.getDouble(iidx1))
-    }
-  }
-
   /*-------------------------------------------------
    radf3: Real FFT's forward processing of factor 3
-   -------------------------------------------------*/ private[fft] def radf3(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+   -------------------------------------------------*/
+  private[fft] def radf3(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     val taur = -0.5
     val taui = 0.866025403784438707610604524234076962
     var i = 0
@@ -3901,104 +2151,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def radf3(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    val taur = -0.5
-    val taui = 0.866025403784438707610604524234076962
-    var i = 0L
-    var ic = 0L
-    var ci2 = .0
-    var di2 = .0
-    var di3 = .0
-    var cr2 = .0
-    var dr2 = .0
-    var dr3 = .0
-    var ti2 = .0
-    var ti3 = .0
-    var tr2 = .0
-    var tr3 = .0
-    var w1r = .0
-    var w2r = .0
-    var w1i = .0
-    var w2i = .0
-    var iw1 = 0L
-    var iw2 = 0L
-    iw1 = offset
-    iw2 = iw1 + ido
-    val idx0 = l1 * ido
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx3 = 2 * idx0
-      val idx4 = (3 * k + 1) * ido
-      val iidx1 = in_off + idx1
-      val iidx2 = iidx1 + idx0
-      val iidx3 = iidx1 + idx3
-      val i1r = in.getDouble(iidx1)
-      val i2r = in.getDouble(iidx2)
-      val i3r = in.getDouble(iidx3)
-      cr2 = i2r + i3r
-      out.setDouble(out_off + 3 * idx1, i1r + cr2)
-      out.setDouble(out_off + idx4 + ido, taui * (i3r - i2r))
-      out.setDouble(out_off + ido - 1 + idx4, i1r + taur * cr2)
-    }
-    if (ido == 1) return
-    for (k <- 0L until l1) {
-      val idx3 = k * ido
-      val idx4 = 3 * idx3
-      val idx5 = idx3 + idx0
-      val idx6 = idx5 + idx0
-      val idx7 = idx4 + ido
-      val idx8 = idx7 + ido
-      i = 2
-      while ( {
-        i < ido
-      }) {
-        ic = ido - i
-        val widx1 = i - 1 + iw1
-        val widx2 = i - 1 + iw2
-        w1r = wtable_rl.getDouble(widx1 - 1)
-        w1i = wtable_rl.getDouble(widx1)
-        w2r = wtable_rl.getDouble(widx2 - 1)
-        w2i = wtable_rl.getDouble(widx2)
-        val idx9 = in_off + i
-        val idx10 = out_off + i
-        val idx11 = out_off + ic
-        val iidx1 = idx9 + idx3
-        val iidx2 = idx9 + idx5
-        val iidx3 = idx9 + idx6
-        val i1i = in.getDouble(iidx1 - 1)
-        val i1r = in.getDouble(iidx1)
-        val i2i = in.getDouble(iidx2 - 1)
-        val i2r = in.getDouble(iidx2)
-        val i3i = in.getDouble(iidx3 - 1)
-        val i3r = in.getDouble(iidx3)
-        dr2 = w1r * i2i + w1i * i2r
-        di2 = w1r * i2r - w1i * i2i
-        dr3 = w2r * i3i + w2i * i3r
-        di3 = w2r * i3r - w2i * i3i
-        cr2 = dr2 + dr3
-        ci2 = di2 + di3
-        tr2 = i1i + taur * cr2
-        ti2 = i1r + taur * ci2
-        tr3 = taui * (di2 - di3)
-        ti3 = taui * (dr3 - dr2)
-        val oidx1 = idx10 + idx4
-        val oidx2 = idx11 + idx7
-        val oidx3 = idx10 + idx8
-        out.setDouble(oidx1 - 1, i1i + cr2)
-        out.setDouble(oidx1, i1r + ci2)
-        out.setDouble(oidx2 - 1, tr2 - tr3)
-        out.setDouble(oidx2, ti3 - ti2)
-        out.setDouble(oidx3 - 1, tr2 + tr3)
-        out.setDouble(oidx3, ti2 + ti3)
-
-        i += 2
-      }
-    }
-  }
-
   /*-------------------------------------------------
      radb3: Real FFT's backward processing of factor 3
-     -------------------------------------------------*/ private[fft] def radb3(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+     -------------------------------------------------*/
+  private[fft] def radb3(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     val taur = -0.5
     val taui = 0.866025403784438707610604524234076962
     var i = 0
@@ -4090,101 +2246,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def radb3(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    val taur = -0.5
-    val taui = 0.866025403784438707610604524234076962
-    var i = 0L
-    var ic = 0L
-    var ci2 = .0
-    var ci3 = .0
-    var di2 = .0
-    var di3 = .0
-    var cr2 = .0
-    var cr3 = .0
-    var dr2 = .0
-    var dr3 = .0
-    var ti2 = .0
-    var tr2 = .0
-    var w1r = .0
-    var w2r = .0
-    var w1i = .0
-    var w2i = .0
-    var iw1 = 0L
-    var iw2 = 0L
-    iw1 = offset
-    iw2 = iw1 + ido
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val iidx1 = in_off + 3 * idx1
-      val iidx2 = iidx1 + 2 * ido
-      val i1i = in.getDouble(iidx1)
-      tr2 = 2 * in.getDouble(iidx2 - 1)
-      cr2 = i1i + taur * tr2
-      ci3 = 2 * taui * in.getDouble(iidx2)
-      out.setDouble(out_off + idx1, i1i + tr2)
-      out.setDouble(out_off + (k + l1) * ido, cr2 - ci3)
-      out.setDouble(out_off + (k + 2 * l1) * ido, cr2 + ci3)
-    }
-    if (ido == 1) return
-    val idx0 = l1 * ido
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 3 * idx1
-      val idx3 = idx2 + ido
-      val idx4 = idx3 + ido
-      val idx5 = idx1 + idx0
-      val idx6 = idx5 + idx0
-      i = 2
-      while ( {
-        i < ido
-      }) {
-        ic = ido - i
-        val idx7 = in_off + i
-        val idx8 = in_off + ic
-        val idx9 = out_off + i
-        val iidx1 = idx7 + idx2
-        val iidx2 = idx7 + idx4
-        val iidx3 = idx8 + idx3
-        val i1i = in.getDouble(iidx1 - 1)
-        val i1r = in.getDouble(iidx1)
-        val i2i = in.getDouble(iidx2 - 1)
-        val i2r = in.getDouble(iidx2)
-        val i3i = in.getDouble(iidx3 - 1)
-        val i3r = in.getDouble(iidx3)
-        tr2 = i2i + i3i
-        cr2 = i1i + taur * tr2
-        ti2 = i2r - i3r
-        ci2 = i1r + taur * ti2
-        cr3 = taui * (i2i - i3i)
-        ci3 = taui * (i2r + i3r)
-        dr2 = cr2 - ci3
-        dr3 = cr2 + ci3
-        di2 = ci2 + cr3
-        di3 = ci2 - cr3
-        val widx1 = i - 1 + iw1
-        val widx2 = i - 1 + iw2
-        w1r = wtable_rl.getDouble(widx1 - 1)
-        w1i = wtable_rl.getDouble(widx1)
-        w2r = wtable_rl.getDouble(widx2 - 1)
-        w2i = wtable_rl.getDouble(widx2)
-        val oidx1 = idx9 + idx1
-        val oidx2 = idx9 + idx5
-        val oidx3 = idx9 + idx6
-        out.setDouble(oidx1 - 1, i1i + tr2)
-        out.setDouble(oidx1, i1r + ti2)
-        out.setDouble(oidx2 - 1, w1r * dr2 - w1i * di2)
-        out.setDouble(oidx2, w1r * di2 + w1i * dr2)
-        out.setDouble(oidx3 - 1, w2r * dr3 - w2i * di3)
-        out.setDouble(oidx3, w2r * di3 + w2i * dr3)
-
-        i += 2
-      }
-    }
-  }
-
   /*-------------------------------------------------
    radf4: Real FFT's forward processing of factor 4
-   -------------------------------------------------*/ private[fft] def radf4(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+   -------------------------------------------------*/
+  private[fft] def radf4(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     val hsqt2 = 0.707106781186547572737310929369414225
     var i = 0
     var ic = 0
@@ -4331,156 +2396,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def radf4(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    val hsqt2 = 0.707106781186547572737310929369414225
-    var i = 0L
-    var ic = 0L
-    var ci2 = .0
-    var ci3 = .0
-    var ci4 = .0
-    var cr2 = .0
-    var cr3 = .0
-    var cr4 = .0
-    var ti1 = .0
-    var ti2 = .0
-    var ti3 = .0
-    var ti4 = .0
-    var tr1 = .0
-    var tr2 = .0
-    var tr3 = .0
-    var tr4 = .0
-    var w1r = .0
-    var w1i = .0
-    var w2r = .0
-    var w2i = .0
-    var w3r = .0
-    var w3i = .0
-    var iw1 = 0L
-    var iw2 = 0L
-    var iw3 = 0L
-    iw1 = offset
-    iw2 = offset + ido
-    iw3 = iw2 + ido
-    val idx0 = l1 * ido
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 4 * idx1
-      val idx3 = idx1 + idx0
-      val idx4 = idx3 + idx0
-      val idx5 = idx4 + idx0
-      val idx6 = idx2 + ido
-      val i1r = in.getDouble(in_off + idx1)
-      val i2r = in.getDouble(in_off + idx3)
-      val i3r = in.getDouble(in_off + idx4)
-      val i4r = in.getDouble(in_off + idx5)
-      tr1 = i2r + i4r
-      tr2 = i1r + i3r
-      val oidx1 = out_off + idx2
-      val oidx2 = out_off + idx6 + ido
-      out.setDouble(oidx1, tr1 + tr2)
-      out.setDouble(oidx2 - 1 + ido + ido, tr2 - tr1)
-      out.setDouble(oidx2 - 1, i1r - i3r)
-      out.setDouble(oidx2, i4r - i2r)
-    }
-    if (ido < 2) return
-    if (ido != 2) {
-      for (k <- 0L until l1) {
-        val idx1 = k * ido
-        val idx2 = idx1 + idx0
-        val idx3 = idx2 + idx0
-        val idx4 = idx3 + idx0
-        val idx5 = 4 * idx1
-        val idx6 = idx5 + ido
-        val idx7 = idx6 + ido
-        val idx8 = idx7 + ido
-        i = 2
-        while ( {
-          i < ido
-        }) {
-          ic = ido - i
-          val widx1 = i - 1 + iw1
-          val widx2 = i - 1 + iw2
-          val widx3 = i - 1 + iw3
-          w1r = wtable_rl.getDouble(widx1 - 1)
-          w1i = wtable_rl.getDouble(widx1)
-          w2r = wtable_rl.getDouble(widx2 - 1)
-          w2i = wtable_rl.getDouble(widx2)
-          w3r = wtable_rl.getDouble(widx3 - 1)
-          w3i = wtable_rl.getDouble(widx3)
-          val idx9 = in_off + i
-          val idx10 = out_off + i
-          val idx11 = out_off + ic
-          val iidx1 = idx9 + idx1
-          val iidx2 = idx9 + idx2
-          val iidx3 = idx9 + idx3
-          val iidx4 = idx9 + idx4
-          val i1i = in.getDouble(iidx1 - 1)
-          val i1r = in.getDouble(iidx1)
-          val i2i = in.getDouble(iidx2 - 1)
-          val i2r = in.getDouble(iidx2)
-          val i3i = in.getDouble(iidx3 - 1)
-          val i3r = in.getDouble(iidx3)
-          val i4i = in.getDouble(iidx4 - 1)
-          val i4r = in.getDouble(iidx4)
-          cr2 = w1r * i2i + w1i * i2r
-          ci2 = w1r * i2r - w1i * i2i
-          cr3 = w2r * i3i + w2i * i3r
-          ci3 = w2r * i3r - w2i * i3i
-          cr4 = w3r * i4i + w3i * i4r
-          ci4 = w3r * i4r - w3i * i4i
-          tr1 = cr2 + cr4
-          tr4 = cr4 - cr2
-          ti1 = ci2 + ci4
-          ti4 = ci2 - ci4
-          ti2 = i1r + ci3
-          ti3 = i1r - ci3
-          tr2 = i1i + cr3
-          tr3 = i1i - cr3
-          val oidx1 = idx10 + idx5
-          val oidx2 = idx11 + idx6
-          val oidx3 = idx10 + idx7
-          val oidx4 = idx11 + idx8
-          out.setDouble(oidx1 - 1, tr1 + tr2)
-          out.setDouble(oidx4 - 1, tr2 - tr1)
-          out.setDouble(oidx1, ti1 + ti2)
-          out.setDouble(oidx4, ti1 - ti2)
-          out.setDouble(oidx3 - 1, ti4 + tr3)
-          out.setDouble(oidx2 - 1, tr3 - ti4)
-          out.setDouble(oidx3, tr4 + ti3)
-          out.setDouble(oidx2, tr4 - ti3)
-
-          i += 2
-        }
-      }
-      if (ido % 2 == 1) return
-    }
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 4 * idx1
-      val idx3 = idx1 + idx0
-      val idx4 = idx3 + idx0
-      val idx5 = idx4 + idx0
-      val idx6 = idx2 + ido
-      val idx7 = idx6 + ido
-      val idx8 = idx7 + ido
-      val idx9 = in_off + ido
-      val idx10 = out_off + ido
-      val i1i = in.getDouble(idx9 - 1 + idx1)
-      val i2i = in.getDouble(idx9 - 1 + idx3)
-      val i3i = in.getDouble(idx9 - 1 + idx4)
-      val i4i = in.getDouble(idx9 - 1 + idx5)
-      ti1 = -hsqt2 * (i2i + i4i)
-      tr1 = hsqt2 * (i2i - i4i)
-      out.setDouble(idx10 - 1 + idx2, tr1 + i1i)
-      out.setDouble(idx10 - 1 + idx7, i1i - tr1)
-      out.setDouble(out_off + idx6, ti1 - i3i)
-      out.setDouble(out_off + idx8, ti1 + i3i)
-    }
-  }
-
   /*-------------------------------------------------
    radb4: Real FFT's backward processing of factor 4
-   -------------------------------------------------*/ private[fft] def radb4(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+   -------------------------------------------------*/
+  private[fft] def radb4(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     val sqrt2 = 1.41421356237309514547462185873882845
     var i = 0
     var ic = 0
@@ -4632,161 +2551,9 @@ final class DoubleFFT_1D(n0: Long) {
   }
 
   /*-------------------------------------------------
-     radb4: Real FFT's backward processing of factor 4
-     -------------------------------------------------*/ private[fft] def radb4(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    val sqrt2 = 1.41421356237309514547462185873882845
-    var i = 0L
-    var ic = 0L
-    var ci2 = .0
-    var ci3 = .0
-    var ci4 = .0
-    var cr2 = .0
-    var cr3 = .0
-    var cr4 = .0
-    var ti1 = .0
-    var ti2 = .0
-    var ti3 = .0
-    var ti4 = .0
-    var tr1 = .0
-    var tr2 = .0
-    var tr3 = .0
-    var tr4 = .0
-    var w1r = .0
-    var w1i = .0
-    var w2r = .0
-    var w2i = .0
-    var w3r = .0
-    var w3i = .0
-    var iw1 = 0L
-    var iw2 = 0L
-    var iw3 = 0L
-    iw1 = offset
-    iw2 = iw1 + ido
-    iw3 = iw2 + ido
-    val idx0 = l1 * ido
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 4 * idx1
-      val idx3 = idx1 + idx0
-      val idx4 = idx3 + idx0
-      val idx5 = idx4 + idx0
-      val idx6 = idx2 + ido
-      val idx7 = idx6 + ido
-      val idx8 = idx7 + ido
-      val i1r = in.getDouble(in_off + idx2)
-      val i2r = in.getDouble(in_off + idx7)
-      val i3r = in.getDouble(in_off + ido - 1 + idx8)
-      val i4r = in.getDouble(in_off + ido - 1 + idx6)
-      tr1 = i1r - i3r
-      tr2 = i1r + i3r
-      tr3 = i4r + i4r
-      tr4 = i2r + i2r
-      out.setDouble(out_off + idx1, tr2 + tr3)
-      out.setDouble(out_off + idx3, tr1 - tr4)
-      out.setDouble(out_off + idx4, tr2 - tr3)
-      out.setDouble(out_off + idx5, tr1 + tr4)
-    }
-    if (ido < 2) return
-    if (ido != 2) {
-      for (k <- 0L until l1) {
-        val idx1 = k * ido
-        val idx2 = idx1 + idx0
-        val idx3 = idx2 + idx0
-        val idx4 = idx3 + idx0
-        val idx5 = 4 * idx1
-        val idx6 = idx5 + ido
-        val idx7 = idx6 + ido
-        val idx8 = idx7 + ido
-        i = 2
-        while ( {
-          i < ido
-        }) {
-          ic = ido - i
-          val widx1 = i - 1 + iw1
-          val widx2 = i - 1 + iw2
-          val widx3 = i - 1 + iw3
-          w1r = wtable_rl.getDouble(widx1 - 1)
-          w1i = wtable_rl.getDouble(widx1)
-          w2r = wtable_rl.getDouble(widx2 - 1)
-          w2i = wtable_rl.getDouble(widx2)
-          w3r = wtable_rl.getDouble(widx3 - 1)
-          w3i = wtable_rl.getDouble(widx3)
-          val idx12 = in_off + i
-          val idx13 = in_off + ic
-          val idx14 = out_off + i
-          val iidx1 = idx12 + idx5
-          val iidx2 = idx13 + idx6
-          val iidx3 = idx12 + idx7
-          val iidx4 = idx13 + idx8
-          val i1i = in.getDouble(iidx1 - 1)
-          val i1r = in.getDouble(iidx1)
-          val i2i = in.getDouble(iidx2 - 1)
-          val i2r = in.getDouble(iidx2)
-          val i3i = in.getDouble(iidx3 - 1)
-          val i3r = in.getDouble(iidx3)
-          val i4i = in.getDouble(iidx4 - 1)
-          val i4r = in.getDouble(iidx4)
-          ti1 = i1r + i4r
-          ti2 = i1r - i4r
-          ti3 = i3r - i2r
-          tr4 = i3r + i2r
-          tr1 = i1i - i4i
-          tr2 = i1i + i4i
-          ti4 = i3i - i2i
-          tr3 = i3i + i2i
-          cr3 = tr2 - tr3
-          ci3 = ti2 - ti3
-          cr2 = tr1 - tr4
-          cr4 = tr1 + tr4
-          ci2 = ti1 + ti4
-          ci4 = ti1 - ti4
-          val oidx1 = idx14 + idx1
-          val oidx2 = idx14 + idx2
-          val oidx3 = idx14 + idx3
-          val oidx4 = idx14 + idx4
-          out.setDouble(oidx1 - 1, tr2 + tr3)
-          out.setDouble(oidx1, ti2 + ti3)
-          out.setDouble(oidx2 - 1, w1r * cr2 - w1i * ci2)
-          out.setDouble(oidx2, w1r * ci2 + w1i * cr2)
-          out.setDouble(oidx3 - 1, w2r * cr3 - w2i * ci3)
-          out.setDouble(oidx3, w2r * ci3 + w2i * cr3)
-          out.setDouble(oidx4 - 1, w3r * cr4 - w3i * ci4)
-          out.setDouble(oidx4, w3r * ci4 + w3i * cr4)
-
-          i += 2
-        }
-      }
-      if (ido % 2 == 1) return
-    }
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 4 * idx1
-      val idx3 = idx1 + idx0
-      val idx4 = idx3 + idx0
-      val idx5 = idx4 + idx0
-      val idx6 = idx2 + ido
-      val idx7 = idx6 + ido
-      val idx8 = idx7 + ido
-      val idx9 = in_off + ido
-      val idx10 = out_off + ido
-      val i1r = in.getDouble(idx9 - 1 + idx2)
-      val i2r = in.getDouble(idx9 - 1 + idx7)
-      val i3r = in.getDouble(in_off + idx6)
-      val i4r = in.getDouble(in_off + idx8)
-      ti1 = i3r + i4r
-      ti2 = i4r - i3r
-      tr1 = i1r - i2r
-      tr2 = i1r + i2r
-      out.setDouble(idx10 - 1 + idx1, tr2 + tr2)
-      out.setDouble(idx10 - 1 + idx3, sqrt2 * (tr1 - ti1))
-      out.setDouble(idx10 - 1 + idx4, ti2 + ti2)
-      out.setDouble(idx10 - 1 + idx5, -sqrt2 * (tr1 + ti1))
-    }
-  }
-
-  /*-------------------------------------------------
    radf5: Real FFT's forward processing of factor 5
-   -------------------------------------------------*/ private[fft] def radf5(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+   -------------------------------------------------*/
+  private[fft] def radf5(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     val tr11 = 0.309016994374947451262869435595348477
     val ti11 = 0.951056516295153531181938433292089030
     val tr12 = -0.809016994374947340240566973079694435
@@ -4953,176 +2720,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def radf5(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    val tr11 = 0.309016994374947451262869435595348477
-    val ti11 = 0.951056516295153531181938433292089030
-    val tr12 = -0.809016994374947340240566973079694435
-    val ti12 = 0.587785252292473248125759255344746634
-    var i = 0L
-    var ic = 0L
-    var ci2 = .0
-    var di2 = .0
-    var ci4 = .0
-    var ci5 = .0
-    var di3 = .0
-    var di4 = .0
-    var di5 = .0
-    var ci3 = .0
-    var cr2 = .0
-    var cr3 = .0
-    var dr2 = .0
-    var dr3 = .0
-    var dr4 = .0
-    var dr5 = .0
-    var cr5 = .0
-    var cr4 = .0
-    var ti2 = .0
-    var ti3 = .0
-    var ti5 = .0
-    var ti4 = .0
-    var tr2 = .0
-    var tr3 = .0
-    var tr4 = .0
-    var tr5 = .0
-    var w1r = .0
-    var w1i = .0
-    var w2r = .0
-    var w2i = .0
-    var w3r = .0
-    var w3i = .0
-    var w4r = .0
-    var w4i = .0
-    var iw1 = 0L
-    var iw2 = 0L
-    var iw3 = 0L
-    var iw4 = 0L
-    iw1 = offset
-    iw2 = iw1 + ido
-    iw3 = iw2 + ido
-    iw4 = iw3 + ido
-    val idx0 = l1 * ido
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 5 * idx1
-      val idx3 = idx2 + ido
-      val idx4 = idx3 + ido
-      val idx5 = idx4 + ido
-      val idx6 = idx5 + ido
-      val idx7 = idx1 + idx0
-      val idx8 = idx7 + idx0
-      val idx9 = idx8 + idx0
-      val idx10 = idx9 + idx0
-      val idx11 = out_off + ido - 1
-      val i1r = in.getDouble(in_off + idx1)
-      val i2r = in.getDouble(in_off + idx7)
-      val i3r = in.getDouble(in_off + idx8)
-      val i4r = in.getDouble(in_off + idx9)
-      val i5r = in.getDouble(in_off + idx10)
-      cr2 = i5r + i2r
-      ci5 = i5r - i2r
-      cr3 = i4r + i3r
-      ci4 = i4r - i3r
-      out.setDouble(out_off + idx2, i1r + cr2 + cr3)
-      out.setDouble(idx11 + idx3, i1r + tr11 * cr2 + tr12 * cr3)
-      out.setDouble(out_off + idx4, ti11 * ci5 + ti12 * ci4)
-      out.setDouble(idx11 + idx5, i1r + tr12 * cr2 + tr11 * cr3)
-      out.setDouble(out_off + idx6, ti12 * ci5 - ti11 * ci4)
-    }
-    if (ido == 1) return
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 5 * idx1
-      val idx3 = idx2 + ido
-      val idx4 = idx3 + ido
-      val idx5 = idx4 + ido
-      val idx6 = idx5 + ido
-      val idx7 = idx1 + idx0
-      val idx8 = idx7 + idx0
-      val idx9 = idx8 + idx0
-      val idx10 = idx9 + idx0
-      i = 2
-      while ( {
-        i < ido
-      }) {
-        val widx1 = i - 1 + iw1
-        val widx2 = i - 1 + iw2
-        val widx3 = i - 1 + iw3
-        val widx4 = i - 1 + iw4
-        w1r = wtable_rl.getDouble(widx1 - 1)
-        w1i = wtable_rl.getDouble(widx1)
-        w2r = wtable_rl.getDouble(widx2 - 1)
-        w2i = wtable_rl.getDouble(widx2)
-        w3r = wtable_rl.getDouble(widx3 - 1)
-        w3i = wtable_rl.getDouble(widx3)
-        w4r = wtable_rl.getDouble(widx4 - 1)
-        w4i = wtable_rl.getDouble(widx4)
-        ic = ido - i
-        val idx15 = in_off + i
-        val idx16 = out_off + i
-        val idx17 = out_off + ic
-        val iidx1 = idx15 + idx1
-        val iidx2 = idx15 + idx7
-        val iidx3 = idx15 + idx8
-        val iidx4 = idx15 + idx9
-        val iidx5 = idx15 + idx10
-        val i1i = in.getDouble(iidx1 - 1)
-        val i1r = in.getDouble(iidx1)
-        val i2i = in.getDouble(iidx2 - 1)
-        val i2r = in.getDouble(iidx2)
-        val i3i = in.getDouble(iidx3 - 1)
-        val i3r = in.getDouble(iidx3)
-        val i4i = in.getDouble(iidx4 - 1)
-        val i4r = in.getDouble(iidx4)
-        val i5i = in.getDouble(iidx5 - 1)
-        val i5r = in.getDouble(iidx5)
-        dr2 = w1r * i2i + w1i * i2r
-        di2 = w1r * i2r - w1i * i2i
-        dr3 = w2r * i3i + w2i * i3r
-        di3 = w2r * i3r - w2i * i3i
-        dr4 = w3r * i4i + w3i * i4r
-        di4 = w3r * i4r - w3i * i4i
-        dr5 = w4r * i5i + w4i * i5r
-        di5 = w4r * i5r - w4i * i5i
-        cr2 = dr2 + dr5
-        ci5 = dr5 - dr2
-        cr5 = di2 - di5
-        ci2 = di2 + di5
-        cr3 = dr3 + dr4
-        ci4 = dr4 - dr3
-        cr4 = di3 - di4
-        ci3 = di3 + di4
-        tr2 = i1i + tr11 * cr2 + tr12 * cr3
-        ti2 = i1r + tr11 * ci2 + tr12 * ci3
-        tr3 = i1i + tr12 * cr2 + tr11 * cr3
-        ti3 = i1r + tr12 * ci2 + tr11 * ci3
-        tr5 = ti11 * cr5 + ti12 * cr4
-        ti5 = ti11 * ci5 + ti12 * ci4
-        tr4 = ti12 * cr5 - ti11 * cr4
-        ti4 = ti12 * ci5 - ti11 * ci4
-        val oidx1 = idx16 + idx2
-        val oidx2 = idx17 + idx3
-        val oidx3 = idx16 + idx4
-        val oidx4 = idx17 + idx5
-        val oidx5 = idx16 + idx6
-        out.setDouble(oidx1 - 1, i1i + cr2 + cr3)
-        out.setDouble(oidx1, i1r + ci2 + ci3)
-        out.setDouble(oidx3 - 1, tr2 + tr5)
-        out.setDouble(oidx2 - 1, tr2 - tr5)
-        out.setDouble(oidx3, ti2 + ti5)
-        out.setDouble(oidx2, ti5 - ti2)
-        out.setDouble(oidx5 - 1, tr3 + tr4)
-        out.setDouble(oidx4 - 1, tr3 - tr4)
-        out.setDouble(oidx5, ti3 + ti4)
-        out.setDouble(oidx4, ti4 - ti3)
-
-        i += 2
-      }
-    }
-  }
-
   /*-------------------------------------------------
    radb5: Real FFT's backward processing of factor 5
-   -------------------------------------------------*/ private[fft] def radb5(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+   -------------------------------------------------*/
+  private[fft] def radb5(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     val tr11 = 0.309016994374947451262869435595348477
     val ti11 = 0.951056516295153531181938433292089030
     val tr12 = -0.809016994374947340240566973079694435
@@ -5289,176 +2890,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def radb5(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    val tr11 = 0.309016994374947451262869435595348477
-    val ti11 = 0.951056516295153531181938433292089030
-    val tr12 = -0.809016994374947340240566973079694435
-    val ti12 = 0.587785252292473248125759255344746634
-    var i = 0L
-    var ic = 0L
-    var ci2 = .0
-    var ci3 = .0
-    var ci4 = .0
-    var ci5 = .0
-    var di3 = .0
-    var di4 = .0
-    var di5 = .0
-    var di2 = .0
-    var cr2 = .0
-    var cr3 = .0
-    var cr5 = .0
-    var cr4 = .0
-    var ti2 = .0
-    var ti3 = .0
-    var ti4 = .0
-    var ti5 = .0
-    var dr3 = .0
-    var dr4 = .0
-    var dr5 = .0
-    var dr2 = .0
-    var tr2 = .0
-    var tr3 = .0
-    var tr4 = .0
-    var tr5 = .0
-    var w1r = .0
-    var w1i = .0
-    var w2r = .0
-    var w2i = .0
-    var w3r = .0
-    var w3i = .0
-    var w4r = .0
-    var w4i = .0
-    var iw1 = 0L
-    var iw2 = 0L
-    var iw3 = 0L
-    var iw4 = 0L
-    iw1 = offset
-    iw2 = iw1 + ido
-    iw3 = iw2 + ido
-    iw4 = iw3 + ido
-    val idx0 = l1 * ido
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 5 * idx1
-      val idx3 = idx2 + ido
-      val idx4 = idx3 + ido
-      val idx5 = idx4 + ido
-      val idx6 = idx5 + ido
-      val idx7 = idx1 + idx0
-      val idx8 = idx7 + idx0
-      val idx9 = idx8 + idx0
-      val idx10 = idx9 + idx0
-      val idx11 = in_off + ido - 1
-      val i1r = in.getDouble(in_off + idx2)
-      ti5 = 2 * in.getDouble(in_off + idx4)
-      ti4 = 2 * in.getDouble(in_off + idx6)
-      tr2 = 2 * in.getDouble(idx11 + idx3)
-      tr3 = 2 * in.getDouble(idx11 + idx5)
-      cr2 = i1r + tr11 * tr2 + tr12 * tr3
-      cr3 = i1r + tr12 * tr2 + tr11 * tr3
-      ci5 = ti11 * ti5 + ti12 * ti4
-      ci4 = ti12 * ti5 - ti11 * ti4
-      out.setDouble(out_off + idx1, i1r + tr2 + tr3)
-      out.setDouble(out_off + idx7, cr2 - ci5)
-      out.setDouble(out_off + idx8, cr3 - ci4)
-      out.setDouble(out_off + idx9, cr3 + ci4)
-      out.setDouble(out_off + idx10, cr2 + ci5)
-    }
-    if (ido == 1) return
-    for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = 5 * idx1
-      val idx3 = idx2 + ido
-      val idx4 = idx3 + ido
-      val idx5 = idx4 + ido
-      val idx6 = idx5 + ido
-      val idx7 = idx1 + idx0
-      val idx8 = idx7 + idx0
-      val idx9 = idx8 + idx0
-      val idx10 = idx9 + idx0
-      i = 2
-      while ( {
-        i < ido
-      }) {
-        ic = ido - i
-        val widx1 = i - 1 + iw1
-        val widx2 = i - 1 + iw2
-        val widx3 = i - 1 + iw3
-        val widx4 = i - 1 + iw4
-        w1r = wtable_rl.getDouble(widx1 - 1)
-        w1i = wtable_rl.getDouble(widx1)
-        w2r = wtable_rl.getDouble(widx2 - 1)
-        w2i = wtable_rl.getDouble(widx2)
-        w3r = wtable_rl.getDouble(widx3 - 1)
-        w3i = wtable_rl.getDouble(widx3)
-        w4r = wtable_rl.getDouble(widx4 - 1)
-        w4i = wtable_rl.getDouble(widx4)
-        val idx15 = in_off + i
-        val idx16 = in_off + ic
-        val idx17 = out_off + i
-        val iidx1 = idx15 + idx2
-        val iidx2 = idx16 + idx3
-        val iidx3 = idx15 + idx4
-        val iidx4 = idx16 + idx5
-        val iidx5 = idx15 + idx6
-        val i1i = in.getDouble(iidx1 - 1)
-        val i1r = in.getDouble(iidx1)
-        val i2i = in.getDouble(iidx2 - 1)
-        val i2r = in.getDouble(iidx2)
-        val i3i = in.getDouble(iidx3 - 1)
-        val i3r = in.getDouble(iidx3)
-        val i4i = in.getDouble(iidx4 - 1)
-        val i4r = in.getDouble(iidx4)
-        val i5i = in.getDouble(iidx5 - 1)
-        val i5r = in.getDouble(iidx5)
-        ti5 = i3r + i2r
-        ti2 = i3r - i2r
-        ti4 = i5r + i4r
-        ti3 = i5r - i4r
-        tr5 = i3i - i2i
-        tr2 = i3i + i2i
-        tr4 = i5i - i4i
-        tr3 = i5i + i4i
-        cr2 = i1i + tr11 * tr2 + tr12 * tr3
-        ci2 = i1r + tr11 * ti2 + tr12 * ti3
-        cr3 = i1i + tr12 * tr2 + tr11 * tr3
-        ci3 = i1r + tr12 * ti2 + tr11 * ti3
-        cr5 = ti11 * tr5 + ti12 * tr4
-        ci5 = ti11 * ti5 + ti12 * ti4
-        cr4 = ti12 * tr5 - ti11 * tr4
-        ci4 = ti12 * ti5 - ti11 * ti4
-        dr3 = cr3 - ci4
-        dr4 = cr3 + ci4
-        di3 = ci3 + cr4
-        di4 = ci3 - cr4
-        dr5 = cr2 + ci5
-        dr2 = cr2 - ci5
-        di5 = ci2 - cr5
-        di2 = ci2 + cr5
-        val oidx1 = idx17 + idx1
-        val oidx2 = idx17 + idx7
-        val oidx3 = idx17 + idx8
-        val oidx4 = idx17 + idx9
-        val oidx5 = idx17 + idx10
-        out.setDouble(oidx1 - 1, i1i + tr2 + tr3)
-        out.setDouble(oidx1, i1r + ti2 + ti3)
-        out.setDouble(oidx2 - 1, w1r * dr2 - w1i * di2)
-        out.setDouble(oidx2, w1r * di2 + w1i * dr2)
-        out.setDouble(oidx3 - 1, w2r * dr3 - w2i * di3)
-        out.setDouble(oidx3, w2r * di3 + w2i * dr3)
-        out.setDouble(oidx4 - 1, w3r * dr4 - w3i * di4)
-        out.setDouble(oidx4, w3r * di4 + w3i * dr4)
-        out.setDouble(oidx5 - 1, w4r * dr5 - w4i * di5)
-        out.setDouble(oidx5, w4r * di5 + w4i * dr5)
-
-        i += 2
-      }
-    }
-  }
-
   /*---------------------------------------------------------
    radfg: Real FFT's forward processing of general factor
-   --------------------------------------------------------*/ private[fft] def radfg(ido: Int, ip: Int, l1: Int, idl1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+   --------------------------------------------------------*/
+  private[fft] def radfg(ido: Int, ip: Int, l1: Int, idl1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     var idij = 0
     var ipph = 0
     var j2 = 0
@@ -5773,324 +3208,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def radfg(ido: Long, ip: Long, l1: Long, idl1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    var idij = 0L
-    var ipph = 0L
-    var j2 = 0L
-    var ic = 0L
-    var jc = 0L
-    var lc = 0L
-    var is = 0L
-    var nbd = 0L
-    var dc2 = .0
-    var ai1 = .0
-    var ai2 = .0
-    var ar1 = .0
-    var ar2 = .0
-    var ds2 = .0
-    var dcp = .0
-    var arg = .0
-    var dsp = .0
-    var ar1h = .0
-    var ar2h = .0
-    var w1r = .0
-    var w1i = .0
-    val iw1 = offset
-    arg = TWO_PI / ip.toDouble
-    dcp = cos(arg)
-    dsp = sin(arg)
-    ipph = (ip + 1) / 2
-    nbd = (ido - 1) / 2
-    if (ido != 1) {
-      for (ik <- 0L until idl1) {
-        out.setDouble(out_off + ik, in.getDouble(in_off + ik))
-      }
-      for (j <- 1L until ip) {
-        val idx1 = j * l1 * ido
-        for (k <- 0L until l1) {
-          val idx2 = k * ido + idx1
-          out.setDouble(out_off + idx2, in.getDouble(in_off + idx2))
-        }
-      }
-      if (nbd <= l1) {
-        is = -ido
-        for (j <- 1L until ip) {
-          is += ido
-          idij = is - 1
-          val idx1 = j * l1 * ido
-          var i = 2
-          while ( {
-            i < ido
-          }) {
-            idij += 2
-            val idx2 = idij + iw1
-            val idx4 = in_off + i
-            val idx5 = out_off + i
-            w1r = wtable_rl.getDouble(idx2 - 1)
-            w1i = wtable_rl.getDouble(idx2)
-            for (k <- 0L until l1) {
-              val idx3 = k * ido + idx1
-              val oidx1 = idx5 + idx3
-              val iidx1 = idx4 + idx3
-              val i1i = in.getDouble(iidx1 - 1)
-              val i1r = in.getDouble(iidx1)
-              out.setDouble(oidx1 - 1, w1r * i1i + w1i * i1r)
-              out.setDouble(oidx1, w1r * i1r - w1i * i1i)
-            }
-
-            i += 2
-          }
-        }
-      }
-      else {
-        is = -ido
-        for (j <- 1L until ip) {
-          is += ido
-          val idx1 = j * l1 * ido
-          for (k <- 0L until l1) {
-            idij = is - 1
-            val idx3 = k * ido + idx1
-            var i = 2
-            while ( {
-              i < ido
-            }) {
-              idij += 2
-              val idx2 = idij + iw1
-              w1r = wtable_rl.getDouble(idx2 - 1)
-              w1i = wtable_rl.getDouble(idx2)
-              val oidx1 = out_off + i + idx3
-              val iidx1 = in_off + i + idx3
-              val i1i = in.getDouble(iidx1 - 1)
-              val i1r = in.getDouble(iidx1)
-              out.setDouble(oidx1 - 1, w1r * i1i + w1i * i1r)
-              out.setDouble(oidx1, w1r * i1r - w1i * i1i)
-
-              i += 2
-            }
-          }
-        }
-      }
-      if (nbd >= l1) for (j <- 1L until ipph) {
-        jc = ip - j
-        val idx1 = j * l1 * ido
-        val idx2 = jc * l1 * ido
-        for (k <- 0L until l1) {
-          val idx3 = k * ido + idx1
-          val idx4 = k * ido + idx2
-          var i = 2
-          while ( {
-            i < ido
-          }) {
-            val idx5 = in_off + i
-            val idx6 = out_off + i
-            val iidx1 = idx5 + idx3
-            val iidx2 = idx5 + idx4
-            val oidx1 = idx6 + idx3
-            val oidx2 = idx6 + idx4
-            val o1i = out.getDouble(oidx1 - 1)
-            val o1r = out.getDouble(oidx1)
-            val o2i = out.getDouble(oidx2 - 1)
-            val o2r = out.getDouble(oidx2)
-            in.setDouble(iidx1 - 1, o1i + o2i)
-            in.setDouble(iidx1, o1r + o2r)
-            in.setDouble(iidx2 - 1, o1r - o2r)
-            in.setDouble(iidx2, o2i - o1i)
-
-            i += 2
-          }
-        }
-      }
-      else for (j <- 1L until ipph) {
-        jc = ip - j
-        val idx1 = j * l1 * ido
-        val idx2 = jc * l1 * ido
-        var i = 2
-        while ( {
-          i < ido
-        }) {
-          val idx5 = in_off + i
-          val idx6 = out_off + i
-          for (k <- 0L until l1) {
-            val idx3 = k * ido + idx1
-            val idx4 = k * ido + idx2
-            val iidx1 = idx5 + idx3
-            val iidx2 = idx5 + idx4
-            val oidx1 = idx6 + idx3
-            val oidx2 = idx6 + idx4
-            val o1i = out.getDouble(oidx1 - 1)
-            val o1r = out.getDouble(oidx1)
-            val o2i = out.getDouble(oidx2 - 1)
-            val o2r = out.getDouble(oidx2)
-            in.setDouble(iidx1 - 1, o1i + o2i)
-            in.setDouble(iidx1, o1r + o2r)
-            in.setDouble(iidx2 - 1, o1r - o2r)
-            in.setDouble(iidx2, o2i - o1i)
-          }
-
-          i += 2
-        }
-      }
-    }
-    else LargeArrayUtils.arraycopy(out, out_off, in, in_off, idl1)
-    for (j <- 1L until ipph) {
-      jc = ip - j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      for (k <- 0L until l1) {
-        val idx3 = k * ido + idx1
-        val idx4 = k * ido + idx2
-        val oidx1 = out_off + idx3
-        val oidx2 = out_off + idx4
-        val o1r = out.getDouble(oidx1)
-        val o2r = out.getDouble(oidx2)
-        in.setDouble(in_off + idx3, o1r + o2r)
-        in.setDouble(in_off + idx4, o2r - o1r)
-      }
-    }
-    ar1 = 1
-    ai1 = 0
-    val idx0 = (ip - 1) * idl1
-    for (l <- 1L until ipph) {
-      lc = ip - l
-      ar1h = dcp * ar1 - dsp * ai1
-      ai1 = dcp * ai1 + dsp * ar1
-      ar1 = ar1h
-      val idx1 = l * idl1
-      val idx2 = lc * idl1
-      for (ik <- 0L until idl1) {
-        val idx3 = out_off + ik
-        val idx4 = in_off + ik
-        out.setDouble(idx3 + idx1, in.getDouble(idx4) + ar1 * in.getDouble(idx4 + idl1))
-        out.setDouble(idx3 + idx2, ai1 * in.getDouble(idx4 + idx0))
-      }
-      dc2 = ar1
-      ds2 = ai1
-      ar2 = ar1
-      ai2 = ai1
-      for (j <- 2L until ipph) {
-        jc = ip - j
-        ar2h = dc2 * ar2 - ds2 * ai2
-        ai2 = dc2 * ai2 + ds2 * ar2
-        ar2 = ar2h
-        val idx3 = j * idl1
-        val idx4 = jc * idl1
-        for (ik <- 0L until idl1) {
-          val idx5 = out_off + ik
-          val idx6 = in_off + ik
-          out.setDouble(idx5 + idx1, out.getDouble(idx5 + idx1) + ar2 * in.getDouble(idx6 + idx3))
-          out.setDouble(idx5 + idx2, out.getDouble(idx5 + idx2) + ai2 * in.getDouble(idx6 + idx4))
-        }
-      }
-    }
-    for (j <- 1L until ipph) {
-      val idx1 = j * idl1
-      for (ik <- 0L until idl1) {
-        out.setDouble(out_off + ik, out.getDouble(out_off + ik) + in.getDouble(in_off + ik + idx1))
-      }
-    }
-    if (ido >= l1) for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = idx1 * ip
-      for (i <- 0L until ido) {
-        in.setDouble(in_off + i + idx2, out.getDouble(out_off + i + idx1))
-      }
-    }
-    else for (i <- 0L until ido) {
-      for (k <- 0L until l1) {
-        val idx1 = k * ido
-        in.setDouble(in_off + i + idx1 * ip, out.getDouble(out_off + i + idx1))
-      }
-    }
-    val idx01 = ip * ido
-    for (j <- 1L until ipph) {
-      jc = ip - j
-      j2 = 2 * j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      val idx3 = j2 * ido
-      for (k <- 0L until l1) {
-        val idx4 = k * ido
-        val idx5 = idx4 + idx1
-        val idx6 = idx4 + idx2
-        val idx7 = k * idx01
-        in.setDouble(in_off + ido - 1 + idx3 - ido + idx7, out.getDouble(out_off + idx5))
-        in.setDouble(in_off + idx3 + idx7, out.getDouble(out_off + idx6))
-      }
-    }
-    if (ido == 1) return
-    if (nbd >= l1) for (j <- 1L until ipph) {
-      jc = ip - j
-      j2 = 2 * j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      val idx3 = j2 * ido
-      for (k <- 0L until l1) {
-        val idx4 = k * idx01
-        val idx5 = k * ido
-        var i = 2
-        while ( {
-          i < ido
-        }) {
-          ic = ido - i
-          val idx6 = in_off + i
-          val idx7 = in_off + ic
-          val idx8 = out_off + i
-          val iidx1 = idx6 + idx3 + idx4
-          val iidx2 = idx7 + idx3 - ido + idx4
-          val oidx1 = idx8 + idx5 + idx1
-          val oidx2 = idx8 + idx5 + idx2
-          val o1i = out.getDouble(oidx1 - 1)
-          val o1r = out.getDouble(oidx1)
-          val o2i = out.getDouble(oidx2 - 1)
-          val o2r = out.getDouble(oidx2)
-          in.setDouble(iidx1 - 1, o1i + o2i)
-          in.setDouble(iidx2 - 1, o1i - o2i)
-          in.setDouble(iidx1, o1r + o2r)
-          in.setDouble(iidx2, o2r - o1r)
-
-          i += 2
-        }
-      }
-    }
-    else for (j <- 1L until ipph) {
-      jc = ip - j
-      j2 = 2 * j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      val idx3 = j2 * ido
-      var i = 2
-      while ( {
-        i < ido
-      }) {
-        ic = ido - i
-        val idx6 = in_off + i
-        val idx7 = in_off + ic
-        val idx8 = out_off + i
-        for (k <- 0L until l1) {
-          val idx4 = k * idx01
-          val idx5 = k * ido
-          val iidx1 = idx6 + idx3 + idx4
-          val iidx2 = idx7 + idx3 - ido + idx4
-          val oidx1 = idx8 + idx5 + idx1
-          val oidx2 = idx8 + idx5 + idx2
-          val o1i = out.getDouble(oidx1 - 1)
-          val o1r = out.getDouble(oidx1)
-          val o2i = out.getDouble(oidx2 - 1)
-          val o2r = out.getDouble(oidx2)
-          in.setDouble(iidx1 - 1, o1i + o2i)
-          in.setDouble(iidx2 - 1, o1i - o2i)
-          in.setDouble(iidx1, o1r + o2r)
-          in.setDouble(iidx2, o2r - o1r)
-        }
-
-        i += 2
-      }
-    }
-  }
-
   /*---------------------------------------------------------
    radbg: Real FFT's backward processing of general factor
-   --------------------------------------------------------*/ private[fft] def radbg(ido: Int, ip: Int, l1: Int, idl1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
+   --------------------------------------------------------*/
+  private[fft] def radbg(ido: Int, ip: Int, l1: Int, idl1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int): Unit = {
     var idij = 0
     var ipph = 0
     var j2 = 0
@@ -6405,324 +3526,10 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def radbg(ido: Long, ip: Long, l1: Long, idl1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long): Unit = {
-    var idij = 0L
-    var ipph = 0L
-    var j2 = 0L
-    var ic = 0L
-    var jc = 0L
-    var lc = 0L
-    var is = 0L
-    var dc2 = .0
-    var ai1 = .0
-    var ai2 = .0
-    var ar1 = .0
-    var ar2 = .0
-    var ds2 = .0
-    var w1r = .0
-    var w1i = .0
-    var nbd = 0L
-    var dcp = .0
-    var arg = .0
-    var dsp = .0
-    var ar1h = .0
-    var ar2h = .0
-    val iw1 = offset
-    arg = TWO_PI / ip.toDouble
-    dcp = cos(arg)
-    dsp = sin(arg)
-    nbd = (ido - 1) / 2
-    ipph = (ip + 1) / 2
-    val idx0 = ip * ido
-    if (ido >= l1) for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = k * idx0
-      for (i <- 0L until ido) {
-        out.setDouble(out_off + i + idx1, in.getDouble(in_off + i + idx2))
-      }
-    }
-    else for (i <- 0L until ido) {
-      val idx1 = out_off + i
-      val idx2 = in_off + i
-      for (k <- 0L until l1) {
-        out.setDouble(idx1 + k * ido, in.getDouble(idx2 + k * idx0))
-      }
-    }
-    val iidx0 = in_off + ido - 1
-    for (j <- 1L until ipph) {
-      jc = ip - j
-      j2 = 2 * j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      val idx3 = j2 * ido
-      for (k <- 0L until l1) {
-        val idx4 = k * ido
-        val idx5 = idx4 * ip
-        val iidx1 = iidx0 + idx3 + idx5 - ido
-        val iidx2 = in_off + idx3 + idx5
-        val i1r = in.getDouble(iidx1)
-        val i2r = in.getDouble(iidx2)
-        out.setDouble(out_off + idx4 + idx1, i1r + i1r)
-        out.setDouble(out_off + idx4 + idx2, i2r + i2r)
-      }
-    }
-    if (ido != 1) if (nbd >= l1) for (j <- 1L until ipph) {
-      jc = ip - j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      val idx3 = 2 * j * ido
-      for (k <- 0L until l1) {
-        val idx4 = k * ido + idx1
-        val idx5 = k * ido + idx2
-        val idx6 = k * ip * ido + idx3
-        var i = 2
-        while ( {
-          i < ido
-        }) {
-          ic = ido - i
-          val idx7 = out_off + i
-          val idx8 = in_off + ic
-          val idx9 = in_off + i
-          val oidx1 = idx7 + idx4
-          val oidx2 = idx7 + idx5
-          val iidx1 = idx9 + idx6
-          val iidx2 = idx8 + idx6 - ido
-          val a1i = in.getDouble(iidx1 - 1)
-          val a1r = in.getDouble(iidx1)
-          val a2i = in.getDouble(iidx2 - 1)
-          val a2r = in.getDouble(iidx2)
-          out.setDouble(oidx1 - 1, a1i + a2i)
-          out.setDouble(oidx2 - 1, a1i - a2i)
-          out.setDouble(oidx1, a1r - a2r)
-          out.setDouble(oidx2, a1r + a2r)
-
-          i += 2
-        }
-      }
-    }
-    else for (j <- 1L until ipph) {
-      jc = ip - j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      val idx3 = 2 * j * ido
-      var i = 2
-      while ( {
-        i < ido
-      }) {
-        ic = ido - i
-        val idx7 = out_off + i
-        val idx8 = in_off + ic
-        val idx9 = in_off + i
-        for (k <- 0L until l1) {
-          val idx4 = k * ido + idx1
-          val idx5 = k * ido + idx2
-          val idx6 = k * ip * ido + idx3
-          val oidx1 = idx7 + idx4
-          val oidx2 = idx7 + idx5
-          val iidx1 = idx9 + idx6
-          val iidx2 = idx8 + idx6 - ido
-          val a1i = in.getDouble(iidx1 - 1)
-          val a1r = in.getDouble(iidx1)
-          val a2i = in.getDouble(iidx2 - 1)
-          val a2r = in.getDouble(iidx2)
-          out.setDouble(oidx1 - 1, a1i + a2i)
-          out.setDouble(oidx2 - 1, a1i - a2i)
-          out.setDouble(oidx1, a1r - a2r)
-          out.setDouble(oidx2, a1r + a2r)
-        }
-
-        i += 2
-      }
-    }
-    ar1 = 1
-    ai1 = 0
-    val idx01 = (ip - 1) * idl1
-    for (l <- 1L until ipph) {
-      lc = ip - l
-      ar1h = dcp * ar1 - dsp * ai1
-      ai1 = dcp * ai1 + dsp * ar1
-      ar1 = ar1h
-      val idx1 = l * idl1
-      val idx2 = lc * idl1
-      for (ik <- 0L until idl1) {
-        val idx3 = in_off + ik
-        val idx4 = out_off + ik
-        in.setDouble(idx3 + idx1, out.getDouble(idx4) + ar1 * out.getDouble(idx4 + idl1))
-        in.setDouble(idx3 + idx2, ai1 * out.getDouble(idx4 + idx01))
-      }
-      dc2 = ar1
-      ds2 = ai1
-      ar2 = ar1
-      ai2 = ai1
-      for (j <- 2L until ipph) {
-        jc = ip - j
-        ar2h = dc2 * ar2 - ds2 * ai2
-        ai2 = dc2 * ai2 + ds2 * ar2
-        ar2 = ar2h
-        val idx5 = j * idl1
-        val idx6 = jc * idl1
-        for (ik <- 0L until idl1) {
-          val idx7 = in_off + ik
-          val idx8 = out_off + ik
-          in.setDouble(idx7 + idx1, in.getDouble(idx7 + idx1) + ar2 * out.getDouble(idx8 + idx5))
-          in.setDouble(idx7 + idx2, in.getDouble(idx7 + idx2) + ai2 * out.getDouble(idx8 + idx6))
-        }
-      }
-    }
-    for (j <- 1L until ipph) {
-      val idx1 = j * idl1
-      for (ik <- 0L until idl1) {
-        val idx2 = out_off + ik
-        out.setDouble(idx2, out.getDouble(idx2) + out.getDouble(idx2 + idx1))
-      }
-    }
-    for (j <- 1L until ipph) {
-      jc = ip - j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      for (k <- 0L until l1) {
-        val idx3 = k * ido
-        val oidx1 = out_off + idx3
-        val iidx1 = in_off + idx3 + idx1
-        val iidx2 = in_off + idx3 + idx2
-        val i1r = in.getDouble(iidx1)
-        val i2r = in.getDouble(iidx2)
-        out.setDouble(oidx1 + idx1, i1r - i2r)
-        out.setDouble(oidx1 + idx2, i1r + i2r)
-      }
-    }
-    if (ido == 1) return
-    if (nbd >= l1) for (j <- 1L until ipph) {
-      jc = ip - j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      for (k <- 0L until l1) {
-        val idx3 = k * ido
-        var i = 2
-        while ( {
-          i < ido
-        }) {
-          val idx4 = out_off + i
-          val idx5 = in_off + i
-          val oidx1 = idx4 + idx3 + idx1
-          val oidx2 = idx4 + idx3 + idx2
-          val iidx1 = idx5 + idx3 + idx1
-          val iidx2 = idx5 + idx3 + idx2
-          val i1i = in.getDouble(iidx1 - 1)
-          val i1r = in.getDouble(iidx1)
-          val i2i = in.getDouble(iidx2 - 1)
-          val i2r = in.getDouble(iidx2)
-          out.setDouble(oidx1 - 1, i1i - i2r)
-          out.setDouble(oidx2 - 1, i1i + i2r)
-          out.setDouble(oidx1, i1r + i2i)
-          out.setDouble(oidx2, i1r - i2i)
-
-          i += 2
-        }
-      }
-    }
-    else for (j <- 1L until ipph) {
-      jc = ip - j
-      val idx1 = j * l1 * ido
-      val idx2 = jc * l1 * ido
-      var i = 2
-      while ( {
-        i < ido
-      }) {
-        val idx4 = out_off + i
-        val idx5 = in_off + i
-        for (k <- 0L until l1) {
-          val idx3 = k * ido
-          val oidx1 = idx4 + idx3 + idx1
-          val oidx2 = idx4 + idx3 + idx2
-          val iidx1 = idx5 + idx3 + idx1
-          val iidx2 = idx5 + idx3 + idx2
-          val i1i = in.getDouble(iidx1 - 1)
-          val i1r = in.getDouble(iidx1)
-          val i2i = in.getDouble(iidx2 - 1)
-          val i2r = in.getDouble(iidx2)
-          out.setDouble(oidx1 - 1, i1i - i2r)
-          out.setDouble(oidx2 - 1, i1i + i2r)
-          out.setDouble(oidx1, i1r + i2i)
-          out.setDouble(oidx2, i1r - i2i)
-        }
-
-        i += 2
-      }
-    }
-    LargeArrayUtils.arraycopy(out, out_off, in, in_off, idl1)
-    for (j <- 1L until ip) {
-      val idx1 = j * l1 * ido
-      for (k <- 0L until l1) {
-        val idx2 = k * ido + idx1
-        in.setDouble(in_off + idx2, out.getDouble(out_off + idx2))
-      }
-    }
-    if (nbd <= l1) {
-      is = -ido
-      for (j <- 1L until ip) {
-        is += ido
-        idij = is - 1
-        val idx1 = j * l1 * ido
-        var i = 2
-        while ( {
-          i < ido
-        }) {
-          idij += 2
-          val idx2 = idij + iw1
-          w1r = wtable_rl.getDouble(idx2 - 1)
-          w1i = wtable_rl.getDouble(idx2)
-          val idx4 = in_off + i
-          val idx5 = out_off + i
-          for (k <- 0L until l1) {
-            val idx3 = k * ido + idx1
-            val iidx1 = idx4 + idx3
-            val oidx1 = idx5 + idx3
-            val o1i = out.getDouble(oidx1 - 1)
-            val o1r = out.getDouble(oidx1)
-            in.setDouble(iidx1 - 1, w1r * o1i - w1i * o1r)
-            in.setDouble(iidx1, w1r * o1r + w1i * o1i)
-          }
-
-          i += 2
-        }
-      }
-    }
-    else {
-      is = -ido
-      for (j <- 1L until ip) {
-        is += ido
-        val idx1 = j * l1 * ido
-        for (k <- 0L until l1) {
-          idij = is - 1
-          val idx3 = k * ido + idx1
-          var i = 2
-          while ( {
-            i < ido
-          }) {
-            idij += 2
-            val idx2 = idij + iw1
-            w1r = wtable_rl.getDouble(idx2 - 1)
-            w1i = wtable_rl.getDouble(idx2)
-            val idx4 = in_off + i
-            val idx5 = out_off + i
-            val iidx1 = idx4 + idx3
-            val oidx1 = idx5 + idx3
-            val o1i = out.getDouble(oidx1 - 1)
-            val o1r = out.getDouble(oidx1)
-            in.setDouble(iidx1 - 1, w1r * o1i - w1i * o1r)
-            in.setDouble(iidx1, w1r * o1r + w1i * o1i)
-
-            i += 2
-          }
-        }
-      }
-    }
-  }
-
   /*---------------------------------------------------------
      cfftf1: further processing of Complex forward FFT
-     --------------------------------------------------------*/ private[fft] def cfftf(a: Array[Double], offa: Int, isign: Int): Unit = {
+     --------------------------------------------------------*/
+  private[fft] def cfftf(a: Array[Double], offa: Int, isign: Int): Unit = {
     var idot = 0
     var l1 = 0
     var l2 = 0
@@ -6784,72 +3591,11 @@ final class DoubleFFT_1D(n0: Long) {
     System.arraycopy(ch, 0, a, offa, twon)
   }
 
-  private[fft] def cfftf(a: DoubleLargeArray, offa: Long, isign: Int): Unit = {
-    var idot = 0L
-    var l1 = 0L
-    var l2 = 0L
-    var na = 0L
-    var nf = 0L
-    var iw = 0L
-    var ido = 0L
-    var idl1 = 0L
-    val nac = new Array[Int](1)
-    val twon = 2 * nl
-    var ipll = 0
-    var iw1 = 0L
-    var iw2 = 0L
-    val ch = new DoubleLargeArray(twon)
-    iw1 = twon
-    iw2 = 4 * nl
-    nac(0) = 0
-    nf = wtablel.getDouble(1 + iw2).toLong
-    na = 0
-    l1 = 1
-    iw = iw1
-    for (k1 <- 2L to nf + 1) {
-      ipll = wtablel.getDouble(k1 + iw2).toInt
-      l2 = ipll * l1
-      ido = nl / l2
-      idot = ido + ido
-      idl1 = idot * l1
-      ipll match {
-        case 4 =>
-          if (na == 0) passf4(idot, l1, a, offa, ch, 0, iw, isign)
-          else passf4(idot, l1, ch, 0, a, offa, iw, isign)
-          na = 1 - na
-
-        case 2 =>
-          if (na == 0) passf2(idot, l1, a, offa, ch, 0, iw, isign)
-          else passf2(idot, l1, ch, 0, a, offa, iw, isign)
-          na = 1 - na
-
-        case 3 =>
-          if (na == 0) passf3(idot, l1, a, offa, ch, 0, iw, isign)
-          else passf3(idot, l1, ch, 0, a, offa, iw, isign)
-          na = 1 - na
-
-        case 5 =>
-          if (na == 0) passf5(idot, l1, a, offa, ch, 0, iw, isign)
-          else passf5(idot, l1, ch, 0, a, offa, iw, isign)
-          na = 1 - na
-
-        case _ =>
-          if (na == 0) passfg(nac, idot, ipll, l1, idl1, a, offa, ch, 0, iw, isign)
-          else passfg(nac, idot, ipll, l1, idl1, ch, 0, a, offa, iw, isign)
-          if (nac(0) != 0) na = 1 - na
-
-      }
-      l1 = l2
-      iw += (ipll - 1) * idot
-    }
-    if (na == 0) return
-    LargeArrayUtils.arraycopy(ch, 0, a, offa, twon)
-  }
-
   /*----------------------------------------------------------------------
    passf2: Complex FFT's forward/backward processing of factor 2;
    isign is +1 for backward and -1 for forward transforms
-   ----------------------------------------------------------------------*/ private[fft] def passf2(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
+   ----------------------------------------------------------------------*/
+  private[fft] def passf2(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
     var t1i = .0
     var t1r = .0
     var iw1 = 0
@@ -6899,60 +3645,11 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def passf2(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long, isign: Long): Unit = {
-    var t1i = .0
-    var t1r = .0
-    var iw1 = 0L
-    iw1 = offset
-    val idx = ido * l1
-    if (ido <= 2) for (k <- 0L until l1) {
-      val idx0 = k * ido
-      val iidx1 = in_off + 2 * idx0
-      val iidx2 = iidx1 + ido
-      val a1r = in.getDouble(iidx1)
-      val a1i = in.getDouble(iidx1 + 1)
-      val a2r = in.getDouble(iidx2)
-      val a2i = in.getDouble(iidx2 + 1)
-      val oidx1 = out_off + idx0
-      val oidx2 = oidx1 + idx
-      out.setDouble(oidx1, a1r + a2r)
-      out.setDouble(oidx1 + 1, a1i + a2i)
-      out.setDouble(oidx2, a1r - a2r)
-      out.setDouble(oidx2 + 1, a1i - a2i)
-    }
-    else for (k <- 0L until l1) {
-      var i = 0
-      while ( {
-        i < ido - 1
-      }) {
-        val idx0 = k * ido
-        val iidx1 = in_off + i + 2 * idx0
-        val iidx2 = iidx1 + ido
-        val i1r = in.getDouble(iidx1)
-        val i1i = in.getDouble(iidx1 + 1)
-        val i2r = in.getDouble(iidx2)
-        val i2i = in.getDouble(iidx2 + 1)
-        val widx1 = i + iw1
-        val w1r = wtablel.getDouble(widx1)
-        val w1i = isign * wtablel.getDouble(widx1 + 1)
-        t1r = i1r - i2r
-        t1i = i1i - i2i
-        val oidx1 = out_off + i + idx0
-        val oidx2 = oidx1 + idx
-        out.setDouble(oidx1, i1r + i2r)
-        out.setDouble(oidx1 + 1, i1i + i2i)
-        out.setDouble(oidx2, w1r * t1r - w1i * t1i)
-        out.setDouble(oidx2 + 1, w1r * t1i + w1i * t1r)
-
-        i += 2
-      }
-    }
-  }
-
   /*----------------------------------------------------------------------
    passf3: Complex FFT's forward/backward processing of factor 3;
    isign is +1 for backward and -1 for forward transforms
-   ----------------------------------------------------------------------*/ private[fft] def passf3(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
+   ----------------------------------------------------------------------*/
+  private[fft] def passf3(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
     val taur = -0.5
     val taui = 0.866025403784438707610604524234076962
     var ci2 = .0
@@ -7043,101 +3740,11 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def passf3(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long, isign: Long): Unit = {
-    val taur = -0.5
-    val taui = 0.866025403784438707610604524234076962
-    var ci2 = .0
-    var ci3 = .0
-    var di2 = .0
-    var di3 = .0
-    var cr2 = .0
-    var cr3 = .0
-    var dr2 = .0
-    var dr3 = .0
-    var ti2 = .0
-    var tr2 = .0
-    var iw1 = 0L
-    var iw2 = 0L
-    iw1 = offset
-    iw2 = iw1 + ido
-    val idxt = l1 * ido
-    if (ido == 2) for (k <- 1L to l1) {
-      val iidx1 = in_off + (3 * k - 2) * ido
-      val iidx2 = iidx1 + ido
-      val iidx3 = iidx1 - ido
-      val i1r = in.getDouble(iidx1)
-      val i1i = in.getDouble(iidx1 + 1)
-      val i2r = in.getDouble(iidx2)
-      val i2i = in.getDouble(iidx2 + 1)
-      val i3r = in.getDouble(iidx3)
-      val i3i = in.getDouble(iidx3 + 1)
-      tr2 = i1r + i2r
-      cr2 = i3r + taur * tr2
-      ti2 = i1i + i2i
-      ci2 = i3i + taur * ti2
-      cr3 = isign * taui * (i1r - i2r)
-      ci3 = isign * taui * (i1i - i2i)
-      val oidx1 = out_off + (k - 1) * ido
-      val oidx2 = oidx1 + idxt
-      val oidx3 = oidx2 + idxt
-      out.setDouble(oidx1, in.getDouble(iidx3) + tr2)
-      out.setDouble(oidx1 + 1, i3i + ti2)
-      out.setDouble(oidx2, cr2 - ci3)
-      out.setDouble(oidx2 + 1, ci2 + cr3)
-      out.setDouble(oidx3, cr2 + ci3)
-      out.setDouble(oidx3 + 1, ci2 - cr3)
-    }
-    else for (k <- 1L to l1) {
-      val idx1 = in_off + (3 * k - 2) * ido
-      val idx2 = out_off + (k - 1) * ido
-      var i = 0
-      while ( {
-        i < ido - 1
-      }) {
-        val iidx1 = i + idx1
-        val iidx2 = iidx1 + ido
-        val iidx3 = iidx1 - ido
-        val a1r = in.getDouble(iidx1)
-        val a1i = in.getDouble(iidx1 + 1)
-        val a2r = in.getDouble(iidx2)
-        val a2i = in.getDouble(iidx2 + 1)
-        val a3r = in.getDouble(iidx3)
-        val a3i = in.getDouble(iidx3 + 1)
-        tr2 = a1r + a2r
-        cr2 = a3r + taur * tr2
-        ti2 = a1i + a2i
-        ci2 = a3i + taur * ti2
-        cr3 = isign * taui * (a1r - a2r)
-        ci3 = isign * taui * (a1i - a2i)
-        dr2 = cr2 - ci3
-        dr3 = cr2 + ci3
-        di2 = ci2 + cr3
-        di3 = ci2 - cr3
-        val widx1 = i + iw1
-        val widx2 = i + iw2
-        val w1r = wtablel.getDouble(widx1)
-        val w1i = isign * wtablel.getDouble(widx1 + 1)
-        val w2r = wtablel.getDouble(widx2)
-        val w2i = isign * wtablel.getDouble(widx2 + 1)
-        val oidx1 = i + idx2
-        val oidx2 = oidx1 + idxt
-        val oidx3 = oidx2 + idxt
-        out.setDouble(oidx1, a3r + tr2)
-        out.setDouble(oidx1 + 1, a3i + ti2)
-        out.setDouble(oidx2, w1r * dr2 - w1i * di2)
-        out.setDouble(oidx2 + 1, w1r * di2 + w1i * dr2)
-        out.setDouble(oidx3, w2r * dr3 - w2i * di3)
-        out.setDouble(oidx3 + 1, w2r * di3 + w2i * dr3)
-
-        i += 2
-      }
-    }
-  }
-
   /*----------------------------------------------------------------------
    passf4: Complex FFT's forward/backward processing of factor 4;
    isign is +1 for backward and -1 for forward transforms
-   ----------------------------------------------------------------------*/ private[fft] def passf4(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
+   ----------------------------------------------------------------------*/
+  private[fft] def passf4(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
     var ci2 = .0
     var ci3 = .0
     var ci4 = .0
@@ -7254,127 +3861,11 @@ final class DoubleFFT_1D(n0: Long) {
     }
   }
 
-  private[fft] def passf4(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long, isign: Int): Unit = {
-    var ci2 = .0
-    var ci3 = .0
-    var ci4 = .0
-    var cr2 = .0
-    var cr3 = .0
-    var cr4 = .0
-    var ti1 = .0
-    var ti2 = .0
-    var ti3 = .0
-    var ti4 = .0
-    var tr1 = .0
-    var tr2 = .0
-    var tr3 = .0
-    var tr4 = .0
-    var iw1 = 0L
-    var iw2 = 0L
-    var iw3 = 0L
-    iw1 = offset
-    iw2 = iw1 + ido
-    iw3 = iw2 + ido
-    val idx0 = l1 * ido
-    if (ido == 2) for (k <- 0L until l1) {
-      val idxt1 = k * ido
-      val iidx1 = in_off + 4 * idxt1 + 1
-      val iidx2 = iidx1 + ido
-      val iidx3 = iidx2 + ido
-      val iidx4 = iidx3 + ido
-      val i1i = in.getDouble(iidx1 - 1)
-      val i1r = in.getDouble(iidx1)
-      val i2i = in.getDouble(iidx2 - 1)
-      val i2r = in.getDouble(iidx2)
-      val i3i = in.getDouble(iidx3 - 1)
-      val i3r = in.getDouble(iidx3)
-      val i4i = in.getDouble(iidx4 - 1)
-      val i4r = in.getDouble(iidx4)
-      ti1 = i1r - i3r
-      ti2 = i1r + i3r
-      tr4 = i4r - i2r
-      ti3 = i2r + i4r
-      tr1 = i1i - i3i
-      tr2 = i1i + i3i
-      ti4 = i2i - i4i
-      tr3 = i2i + i4i
-      val oidx1 = out_off + idxt1
-      val oidx2 = oidx1 + idx0
-      val oidx3 = oidx2 + idx0
-      val oidx4 = oidx3 + idx0
-      out.setDouble(oidx1, tr2 + tr3)
-      out.setDouble(oidx1 + 1, ti2 + ti3)
-      out.setDouble(oidx2, tr1 + isign * tr4)
-      out.setDouble(oidx2 + 1, ti1 + isign * ti4)
-      out.setDouble(oidx3, tr2 - tr3)
-      out.setDouble(oidx3 + 1, ti2 - ti3)
-      out.setDouble(oidx4, tr1 - isign * tr4)
-      out.setDouble(oidx4 + 1, ti1 - isign * ti4)
-    }
-    else for (k <- 0L until l1) {
-      val idx1 = k * ido
-      val idx2 = in_off + 1 + 4 * idx1
-      var i = 0
-      while ( {
-        i < ido - 1
-      }) {
-        val iidx1 = i + idx2
-        val iidx2 = iidx1 + ido
-        val iidx3 = iidx2 + ido
-        val iidx4 = iidx3 + ido
-        val i1i = in.getDouble(iidx1 - 1)
-        val i1r = in.getDouble(iidx1)
-        val i2i = in.getDouble(iidx2 - 1)
-        val i2r = in.getDouble(iidx2)
-        val i3i = in.getDouble(iidx3 - 1)
-        val i3r = in.getDouble(iidx3)
-        val i4i = in.getDouble(iidx4 - 1)
-        val i4r = in.getDouble(iidx4)
-        ti1 = i1r - i3r
-        ti2 = i1r + i3r
-        ti3 = i2r + i4r
-        tr4 = i4r - i2r
-        tr1 = i1i - i3i
-        tr2 = i1i + i3i
-        ti4 = i2i - i4i
-        tr3 = i2i + i4i
-        cr3 = tr2 - tr3
-        ci3 = ti2 - ti3
-        cr2 = tr1 + isign * tr4
-        cr4 = tr1 - isign * tr4
-        ci2 = ti1 + isign * ti4
-        ci4 = ti1 - isign * ti4
-        val widx1 = i + iw1
-        val widx2 = i + iw2
-        val widx3 = i + iw3
-        val w1r = wtablel.getDouble(widx1)
-        val w1i = isign * wtablel.getDouble(widx1 + 1)
-        val w2r = wtablel.getDouble(widx2)
-        val w2i = isign * wtablel.getDouble(widx2 + 1)
-        val w3r = wtablel.getDouble(widx3)
-        val w3i = isign * wtablel.getDouble(widx3 + 1)
-        val oidx1 = out_off + i + idx1
-        val oidx2 = oidx1 + idx0
-        val oidx3 = oidx2 + idx0
-        val oidx4 = oidx3 + idx0
-        out.setDouble(oidx1, tr2 + tr3)
-        out.setDouble(oidx1 + 1, ti2 + ti3)
-        out.setDouble(oidx2, w1r * cr2 - w1i * ci2)
-        out.setDouble(oidx2 + 1, w1r * ci2 + w1i * cr2)
-        out.setDouble(oidx3, w2r * cr3 - w2i * ci3)
-        out.setDouble(oidx3 + 1, w2r * ci3 + w2i * cr3)
-        out.setDouble(oidx4, w3r * cr4 - w3i * ci4)
-        out.setDouble(oidx4 + 1, w3r * ci4 + w3i * cr4)
-
-        i += 2
-      }
-    }
-  }
-
   /*----------------------------------------------------------------------
    passf5: Complex FFT's forward/backward processing of factor 5;
    isign is +1 for backward and -1 for forward transforms
-   ----------------------------------------------------------------------*/ private[fft] def passf5(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
+   ----------------------------------------------------------------------*/
+  private[fft] def passf5(ido: Int, l1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
     val tr11 = 0.309016994374947451262869435595348477
     val ti11 = 0.951056516295153531181938433292089030
     val tr12 = -0.809016994374947340240566973079694435
@@ -7539,175 +4030,11 @@ final class DoubleFFT_1D(n0: Long) {
     }
   } /* isign==-1 for forward transform and+1 for backward transform */
 
-  private[fft] def passf5(ido: Long, l1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long, isign: Long): Unit = {
-    val tr11 = 0.309016994374947451262869435595348477
-    val ti11 = 0.951056516295153531181938433292089030
-    val tr12 = -0.809016994374947340240566973079694435
-    val ti12 = 0.587785252292473248125759255344746634
-    var ci2 = .0
-    var ci3 = .0
-    var ci4 = .0
-    var ci5 = .0
-    var di3 = .0
-    var di4 = .0
-    var di5 = .0
-    var di2 = .0
-    var cr2 = .0
-    var cr3 = .0
-    var cr5 = .0
-    var cr4 = .0
-    var ti2 = .0
-    var ti3 = .0
-    var ti4 = .0
-    var ti5 = .0
-    var dr3 = .0
-    var dr4 = .0
-    var dr5 = .0
-    var dr2 = .0
-    var tr2 = .0
-    var tr3 = .0
-    var tr4 = .0
-    var tr5 = .0
-    var iw1 = 0L
-    var iw2 = 0L
-    var iw3 = 0L
-    var iw4 = 0L
-    iw1 = offset
-    iw2 = iw1 + ido
-    iw3 = iw2 + ido
-    iw4 = iw3 + ido
-    val idx0 = l1 * ido
-    if (ido == 2) for (k <- 1L to l1) {
-      val iidx1 = in_off + (5 * k - 4) * ido + 1
-      val iidx2 = iidx1 + ido
-      val iidx3 = iidx1 - ido
-      val iidx4 = iidx2 + ido
-      val iidx5 = iidx4 + ido
-      val i1i = in.getDouble(iidx1 - 1)
-      val i1r = in.getDouble(iidx1)
-      val i2i = in.getDouble(iidx2 - 1)
-      val i2r = in.getDouble(iidx2)
-      val i3i = in.getDouble(iidx3 - 1)
-      val i3r = in.getDouble(iidx3)
-      val i4i = in.getDouble(iidx4 - 1)
-      val i4r = in.getDouble(iidx4)
-      val i5i = in.getDouble(iidx5 - 1)
-      val i5r = in.getDouble(iidx5)
-      ti5 = i1r - i5r
-      ti2 = i1r + i5r
-      ti4 = i2r - i4r
-      ti3 = i2r + i4r
-      tr5 = i1i - i5i
-      tr2 = i1i + i5i
-      tr4 = i2i - i4i
-      tr3 = i2i + i4i
-      cr2 = i3i + tr11 * tr2 + tr12 * tr3
-      ci2 = i3r + tr11 * ti2 + tr12 * ti3
-      cr3 = i3i + tr12 * tr2 + tr11 * tr3
-      ci3 = i3r + tr12 * ti2 + tr11 * ti3
-      cr5 = isign * (ti11 * tr5 + ti12 * tr4)
-      ci5 = isign * (ti11 * ti5 + ti12 * ti4)
-      cr4 = isign * (ti12 * tr5 - ti11 * tr4)
-      ci4 = isign * (ti12 * ti5 - ti11 * ti4)
-      val oidx1 = out_off + (k - 1) * ido
-      val oidx2 = oidx1 + idx0
-      val oidx3 = oidx2 + idx0
-      val oidx4 = oidx3 + idx0
-      val oidx5 = oidx4 + idx0
-      out.setDouble(oidx1, i3i + tr2 + tr3)
-      out.setDouble(oidx1 + 1, i3r + ti2 + ti3)
-      out.setDouble(oidx2, cr2 - ci5)
-      out.setDouble(oidx2 + 1, ci2 + cr5)
-      out.setDouble(oidx3, cr3 - ci4)
-      out.setDouble(oidx3 + 1, ci3 + cr4)
-      out.setDouble(oidx4, cr3 + ci4)
-      out.setDouble(oidx4 + 1, ci3 - cr4)
-      out.setDouble(oidx5, cr2 + ci5)
-      out.setDouble(oidx5 + 1, ci2 - cr5)
-    }
-    else for (k <- 1L to l1) {
-      val idx1 = in_off + 1 + (k * 5 - 4) * ido
-      val idx2 = out_off + (k - 1) * ido
-      var i = 0
-      while ( {
-        i < ido - 1
-      }) {
-        val iidx1 = i + idx1
-        val iidx2 = iidx1 + ido
-        val iidx3 = iidx1 - ido
-        val iidx4 = iidx2 + ido
-        val iidx5 = iidx4 + ido
-        val i1i = in.getDouble(iidx1 - 1)
-        val i1r = in.getDouble(iidx1)
-        val i2i = in.getDouble(iidx2 - 1)
-        val i2r = in.getDouble(iidx2)
-        val i3i = in.getDouble(iidx3 - 1)
-        val i3r = in.getDouble(iidx3)
-        val i4i = in.getDouble(iidx4 - 1)
-        val i4r = in.getDouble(iidx4)
-        val i5i = in.getDouble(iidx5 - 1)
-        val i5r = in.getDouble(iidx5)
-        ti5 = i1r - i5r
-        ti2 = i1r + i5r
-        ti4 = i2r - i4r
-        ti3 = i2r + i4r
-        tr5 = i1i - i5i
-        tr2 = i1i + i5i
-        tr4 = i2i - i4i
-        tr3 = i2i + i4i
-        cr2 = i3i + tr11 * tr2 + tr12 * tr3
-        ci2 = i3r + tr11 * ti2 + tr12 * ti3
-        cr3 = i3i + tr12 * tr2 + tr11 * tr3
-        ci3 = i3r + tr12 * ti2 + tr11 * ti3
-        cr5 = isign * (ti11 * tr5 + ti12 * tr4)
-        ci5 = isign * (ti11 * ti5 + ti12 * ti4)
-        cr4 = isign * (ti12 * tr5 - ti11 * tr4)
-        ci4 = isign * (ti12 * ti5 - ti11 * ti4)
-        dr3 = cr3 - ci4
-        dr4 = cr3 + ci4
-        di3 = ci3 + cr4
-        di4 = ci3 - cr4
-        dr5 = cr2 + ci5
-        dr2 = cr2 - ci5
-        di5 = ci2 - cr5
-        di2 = ci2 + cr5
-        val widx1 = i + iw1
-        val widx2 = i + iw2
-        val widx3 = i + iw3
-        val widx4 = i + iw4
-        val w1r = wtablel.getDouble(widx1)
-        val w1i = isign * wtablel.getDouble(widx1 + 1)
-        val w2r = wtablel.getDouble(widx2)
-        val w2i = isign * wtablel.getDouble(widx2 + 1)
-        val w3r = wtablel.getDouble(widx3)
-        val w3i = isign * wtablel.getDouble(widx3 + 1)
-        val w4r = wtablel.getDouble(widx4)
-        val w4i = isign * wtablel.getDouble(widx4 + 1)
-        val oidx1 = i + idx2
-        val oidx2 = oidx1 + idx0
-        val oidx3 = oidx2 + idx0
-        val oidx4 = oidx3 + idx0
-        val oidx5 = oidx4 + idx0
-        out.setDouble(oidx1, i3i + tr2 + tr3)
-        out.setDouble(oidx1 + 1, i3r + ti2 + ti3)
-        out.setDouble(oidx2, w1r * dr2 - w1i * di2)
-        out.setDouble(oidx2 + 1, w1r * di2 + w1i * dr2)
-        out.setDouble(oidx3, w2r * dr3 - w2i * di3)
-        out.setDouble(oidx3 + 1, w2r * di3 + w2i * dr3)
-        out.setDouble(oidx4, w3r * dr4 - w3i * di4)
-        out.setDouble(oidx4 + 1, w3r * di4 + w3i * dr4)
-        out.setDouble(oidx5, w4r * dr5 - w4i * di5)
-        out.setDouble(oidx5 + 1, w4r * di5 + w4i * dr5)
-
-        i += 2
-      }
-    }
-  }
-
   /*----------------------------------------------------------------------
    passfg: Complex FFT's forward/backward processing of general factor;
    isign is +1 for backward and -1 for forward transforms
-   ----------------------------------------------------------------------*/ private[fft] def passfg(nac: Array[Int], ido: Int, ip: Int, l1: Int, idl1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
+   ----------------------------------------------------------------------*/
+  private[fft] def passfg(nac: Array[Int], ido: Int, ip: Int, l1: Int, idl1: Int, in: Array[Double], in_off: Int, out: Array[Double], out_off: Int, offset: Int, isign: Int): Unit = {
     var idij = 0
     var idlj = 0
     var idot = 0
@@ -7922,229 +4249,6 @@ final class DoubleFFT_1D(n0: Long) {
             val o1r = out(oidx1)
             in(iidx1 - 1) = w1r * o1i - w1i * o1r
             in(iidx1) = w1r * o1r + w1i * o1i
-
-            i += 2
-          }
-        }
-      }
-    }
-  }
-
-  private[fft] def passfg(nac: Array[Int], ido: Long, ip: Long, l1: Long, idl1: Long, in: DoubleLargeArray, in_off: Long, out: DoubleLargeArray, out_off: Long, offset: Long, isign: Long): Unit = {
-    var idij = 0L
-    var idlj = 0L
-    var idot = 0L
-    var ipph = 0L
-    var l = 0L
-    var jc = 0L
-    var lc = 0L
-    var idj = 0L
-    var idl = 0L
-    var inc = 0L
-    var idp = 0L
-    var w1r = .0
-    var w1i = .0
-    var w2i = .0
-    var w2r = .0
-    var iw1 = 0L
-    iw1 = offset
-    idot = ido / 2
-    ipph = (ip + 1) / 2
-    idp = ip * ido
-    if (ido >= l1) {
-      for (j <- 1L until ipph) {
-        jc = ip - j
-        val idx1 = j * ido
-        val idx2 = jc * ido
-        for (k <- 0L until l1) {
-          val idx3 = k * ido
-          val idx4 = idx3 + idx1 * l1
-          val idx5 = idx3 + idx2 * l1
-          val idx6 = idx3 * ip
-          for (i <- 0L until ido) {
-            val oidx1 = out_off + i
-            val i1r = in.getDouble(in_off + i + idx1 + idx6)
-            val i2r = in.getDouble(in_off + i + idx2 + idx6)
-            out.setDouble(oidx1 + idx4, i1r + i2r)
-            out.setDouble(oidx1 + idx5, i1r - i2r)
-          }
-        }
-      }
-      for (k <- 0L until l1) {
-        val idxt1 = k * ido
-        val idxt2 = idxt1 * ip
-        for (i <- 0L until ido) {
-          out.setDouble(out_off + i + idxt1, in.getDouble(in_off + i + idxt2))
-        }
-      }
-    }
-    else {
-      for (j <- 1L until ipph) {
-        jc = ip - j
-        val idxt1 = j * l1 * ido
-        val idxt2 = jc * l1 * ido
-        val idxt3 = j * ido
-        val idxt4 = jc * ido
-        for (i <- 0L until ido) {
-          for (k <- 0L until l1) {
-            val idx1 = k * ido
-            val idx2 = idx1 * ip
-            val idx3 = out_off + i
-            val idx4 = in_off + i
-            val i1r = in.getDouble(idx4 + idxt3 + idx2)
-            val i2r = in.getDouble(idx4 + idxt4 + idx2)
-            out.setDouble(idx3 + idx1 + idxt1, i1r + i2r)
-            out.setDouble(idx3 + idx1 + idxt2, i1r - i2r)
-          }
-        }
-      }
-      for (i <- 0L until ido) {
-        for (k <- 0L until l1) {
-          val idx1 = k * ido
-          out.setDouble(out_off + i + idx1, in.getDouble(in_off + i + idx1 * ip))
-        }
-      }
-    }
-    idl = 2 - ido
-    inc = 0
-    val idxt0 = (ip - 1) * idl1
-    l = 1
-    while ( {
-      l < ipph
-    }) {
-      lc = ip - l
-      idl += ido
-      val idxt1 = l * idl1
-      val idxt2 = lc * idl1
-      val idxt3 = idl + iw1
-      w1r = wtablel.getDouble(idxt3 - 2)
-      w1i = isign * wtablel.getDouble(idxt3 - 1)
-      for (ik <- 0L until idl1) {
-        val idx1 = in_off + ik
-        val idx2 = out_off + ik
-        in.setDouble(idx1 + idxt1, out.getDouble(idx2) + w1r * out.getDouble(idx2 + idl1))
-        in.setDouble(idx1 + idxt2, w1i * out.getDouble(idx2 + idxt0))
-      }
-      idlj = idl
-      inc += ido
-      for (j <- 2L until ipph) {
-        jc = ip - j
-        idlj += inc
-        if (idlj > idp) idlj -= idp
-        val idxt4 = idlj + iw1
-        w2r = wtablel.getDouble(idxt4 - 2)
-        w2i = isign * wtablel.getDouble(idxt4 - 1)
-        val idxt5 = j * idl1
-        val idxt6 = jc * idl1
-        for (ik <- 0L until idl1) {
-          val idx1 = in_off + ik
-          val idx2 = out_off + ik
-          in.setDouble(idx1 + idxt1, in.getDouble(idx1 + idxt1) + w2r * out.getDouble(idx2 + idxt5))
-          in.setDouble(idx1 + idxt2, in.getDouble(idx1 + idxt2) + w2i * out.getDouble(idx2 + idxt6))
-        }
-      }
-
-      l += 1
-    }
-    for (j <- 1L until ipph) {
-      val idxt1 = j * idl1
-      for (ik <- 0L until idl1) {
-        val idx1 = out_off + ik
-        out.setDouble(idx1, out.getDouble(idx1) + out.getDouble(idx1 + idxt1))
-      }
-    }
-    for (j <- 1L until ipph) {
-      jc = ip - j
-      val idx1 = j * idl1
-      val idx2 = jc * idl1
-      var ik = 1
-      while ( {
-        ik < idl1
-      }) {
-        val idx3 = out_off + ik
-        val idx4 = in_off + ik
-        val iidx1 = idx4 + idx1
-        val iidx2 = idx4 + idx2
-        val i1i = in.getDouble(iidx1 - 1)
-        val i1r = in.getDouble(iidx1)
-        val i2i = in.getDouble(iidx2 - 1)
-        val i2r = in.getDouble(iidx2)
-        val oidx1 = idx3 + idx1
-        val oidx2 = idx3 + idx2
-        out.setDouble(oidx1 - 1, i1i - i2r)
-        out.setDouble(oidx2 - 1, i1i + i2r)
-        out.setDouble(oidx1, i1r + i2i)
-        out.setDouble(oidx2, i1r - i2i)
-
-        ik += 2
-      }
-    }
-    nac(0) = 1
-    if (ido == 2) return
-    nac(0) = 0
-    LargeArrayUtils.arraycopy(out, out_off, in, in_off, idl1)
-    val idx0 = l1 * ido
-    for (j <- 1L until ip) {
-      val idx1 = j * idx0
-      for (k <- 0L until l1) {
-        val idx2 = k * ido
-        val oidx1 = out_off + idx2 + idx1
-        val iidx1 = in_off + idx2 + idx1
-        in.setDouble(iidx1, out.getDouble(oidx1))
-        in.setDouble(iidx1 + 1, out.getDouble(oidx1 + 1))
-      }
-    }
-    if (idot <= l1) {
-      idij = 0
-      for (j <- 1L until ip) {
-        idij += 2
-        val idx1 = j * l1 * ido
-        var i = 3
-        while ( {
-          i < ido
-        }) {
-          idij += 2
-          val idx2 = idij + iw1 - 1
-          w1r = wtablel.getDouble(idx2 - 1)
-          w1i = isign * wtablel.getDouble(idx2)
-          val idx3 = in_off + i
-          val idx4 = out_off + i
-          for (k <- 0L until l1) {
-            val idx5 = k * ido + idx1
-            val iidx1 = idx3 + idx5
-            val oidx1 = idx4 + idx5
-            val o1i = out.getDouble(oidx1 - 1)
-            val o1r = out.getDouble(oidx1)
-            in.setDouble(iidx1 - 1, w1r * o1i - w1i * o1r)
-            in.setDouble(iidx1, w1r * o1r + w1i * o1i)
-          }
-
-          i += 2
-        }
-      }
-    }
-    else {
-      idj = 2 - ido
-      for (j <- 1L until ip) {
-        idj += ido
-        val idx1 = j * l1 * ido
-        for (k <- 0L until l1) {
-          idij = idj
-          val idx3 = k * ido + idx1
-          var i = 3
-          while ( {
-            i < ido
-          }) {
-            idij += 2
-            val idx2 = idij - 1 + iw1
-            w1r = wtablel.getDouble(idx2 - 1)
-            w1i = isign * wtablel.getDouble(idx2)
-            val iidx1 = in_off + i + idx3
-            val oidx1 = out_off + i + idx3
-            val o1i = out.getDouble(oidx1 - 1)
-            val o1r = out.getDouble(oidx1)
-            in.setDouble(iidx1 - 1, w1r * o1i - w1i * o1r)
-            in.setDouble(iidx1, w1r * o1r + w1i * o1i)
 
             i += 2
           }
