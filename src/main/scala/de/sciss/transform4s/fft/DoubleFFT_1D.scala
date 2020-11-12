@@ -662,64 +662,56 @@ final class DoubleFFT_1D private (
      --------------------------------------------------------*/
 
   private[fft] def cffti(n: Int, offw: Int): Unit = {
-    if (n == 1) {
-      return
-    }
-    val twon: Int = 2 * n
-    val fourn: Int = 4 * n
-    var argh: Double = .0
-    var idot: Int = 0
-    var ntry: Int = 0
-    var i: Int = 0
-    var j: Int = 0
-    var argld: Double = .0
-    var i1: Int = 0
-    var k1: Int = 0
-    var l1: Int = 0
-    var l2: Int = 0
-    var ib: Int = 0
-    var fi: Double = .0
-    var ld: Int = 0
-    var ii: Int = 0
-    var nf: Int = 0
-    var ipll: Int = 0
-    var nll: Int = 0
-    var nq: Int = 0
-    var nr: Int = 0
-    var arg: Double = .0
-    var ido: Int = 0
-    var ipm: Int = 0
-    nll = n
-    nf = 0
-    j = 0
+    if (n == 1) return
 
-    ??? // factorize_loop //todo: labels are not supported
-    while ( {
-      true
-    }) {
+    val twon  : Int     = 2 * n
+    val fourn : Int     = 4 * n
+    var argh  : Double  = 0.0
+    var idot  : Int     = 0
+    var ntry  : Int     = 0
+    var i     : Int     = 0
+    var j     : Int     = 0
+    var argld : Double  = 0.0
+    var i1    : Int     = 0
+    var k1    : Int     = 0
+    var l1    : Int     = 0
+    var l2    : Int     = 0
+    var ib    : Int     = 0
+    var fi    : Double  = 0.0
+    var ld    : Int     = 0
+    var ii    : Int     = 0
+    var nf    : Int     = 0
+    var ipll  : Int     = 0
+    var nll   : Int     = n
+    var nq    : Int     = 0
+    var nr    : Int     = 0
+    var arg   : Double  = 0.0
+    var ido   : Int     = 0
+    var ipm   : Int     = 0
+
+    j = 0
+    // factorize_loop
+    var _continue_factorize_loop = false
+    while ({
       j += 1
       if (j <= 4) {
         ntry = factors(j - 1)
-      }
-      else {
+      } else {
         ntry += 2
       }
-      do {
-        {
-          nq = nll / ntry
-          nr = nll - ntry * nq
-          if (nr != 0) {
-            ??? // continue factorize_loop //todo: continue is not supported
 
-          }
+      while ({
+        nq = nll / ntry
+        nr = nll - ntry * nq
+        if (nr != 0) {
+          _continue_factorize_loop = true
+        } else {
           nf += 1
           wtable(offw + nf + 1 + fourn) = ntry
           nll = nq
           if (ntry == 2 && nf != 1) {
             i = 2
-            while ( {
-              i <= nf
-            }) {
+            while (i <= nf) {
               ib = nf - i + 2
               val idx: Int = ib + fourn
               wtable(offw + idx + 1) = wtable(offw + idx)
@@ -729,56 +721,52 @@ final class DoubleFFT_1D private (
             wtable(offw + 2 + fourn) = 2
           }
         }
-      } while ( {
-        nll != 1
-      })
-      ??? // break //todo: break is not supported
 
-    }
+        !_continue_factorize_loop && nll != 1
+      }) ()
 
-    wtable(offw + fourn) = n
+      _continue_factorize_loop
+    }) ()
+
+    wtable(offw +     fourn) = n
     wtable(offw + 1 + fourn) = nf
-    argh = TWO_PI / n.toDouble
-    i = 1
-    l1 = 1
-    k1 = 1
-    while ( {
-      k1 <= nf
-    }) {
-      ipll = wtable(offw + k1 + 1 + fourn).toInt
-      ld = 0
-      l2 = l1 * ipll
-      ido = n / l2
-      idot = ido + ido + 2
-      ipm = ipll - 1
+    argh  = TWO_PI / n.toDouble
+    i     = 1
+    l1    = 1
+    k1    = 1
+    while (k1 <= nf) {
+      ipll  = wtable(offw + k1 + 1 + fourn).toInt
+      ld    = 0
+      l2    = l1 * ipll
+      ido   = n / l2
+      idot  = ido + ido + 2
+      ipm   = ipll - 1
+
       j = 1
-      while ( {
-        j <= ipm
-      }) {
+      while (j <= ipm) {
         i1 = i
         wtable(offw + i - 1 + twon) = 1
-        wtable(offw + i + twon) = 0
+        wtable(offw + i     + twon) = 0
         ld += l1
         fi = 0
         argld = ld * argh
+
         ii = 4
-        while ( {
-          ii <= idot
-        }) {
+        while (ii <= idot) {
           i += 2
           fi += 1
           arg = fi * argld
           val idx: Int = i + twon
-          wtable(offw + idx - 1) = cos(arg)
-          wtable(offw + idx) = sin(arg)
+          wtable(offw + idx - 1 ) = cos(arg)
+          wtable(offw + idx     ) = sin(arg)
 
           ii += 2
         }
         if (ipll > 5) {
-          val idx1: Int = i1 + twon
-          val idx2: Int = i + twon
+          val idx1: Int = i1  + twon
+          val idx2: Int = i   + twon
           wtable(offw + idx1 - 1) = wtable(offw + idx2 - 1)
-          wtable(offw + idx1) = wtable(offw + idx2)
+          wtable(offw + idx1    ) = wtable(offw + idx2)
         }
 
         j += 1
@@ -790,64 +778,56 @@ final class DoubleFFT_1D private (
   }
 
   private[fft] def cffti(): Unit = {
-    if (n == 1) {
-      return
-    }
-    val twon: Int = 2 * n
-    val fourn: Int = 4 * n
-    var argh: Double = .0
-    var idot: Int = 0
-    var ntry: Int = 0
-    var i: Int = 0
-    var j: Int = 0
-    var argld: Double = .0
-    var i1: Int = 0
-    var k1: Int = 0
-    var l1: Int = 0
-    var l2: Int = 0
-    var ib: Int = 0
-    var fi: Double = .0
-    var ld: Int = 0
-    var ii: Int = 0
-    var nf: Int = 0
-    var ipll: Int = 0
-    var nll: Int = 0
-    var nq: Int = 0
-    var nr: Int = 0
-    var arg: Double = .0
-    var ido: Int = 0
-    var ipm: Int = 0
-    nll = n
-    nf = 0
-    j = 0
+    if (n == 1) return
 
-    ??? // factorize_loop //todo: labels are not supported
-    while ( {
-      true
-    }) {
+    val twon  : Int     = 2 * n
+    val fourn : Int     = 4 * n
+    var argh  : Double  = 0.0
+    var idot  : Int     = 0
+    var ntry  : Int     = 0
+    var i     : Int     = 0
+    var j     : Int     = 0
+    var argld : Double  = 0.0
+    var i1    : Int     = 0
+    var k1    : Int     = 0
+    var l1    : Int     = 0
+    var l2    : Int     = 0
+    var ib    : Int     = 0
+    var fi    : Double  = 0.0
+    var ld    : Int     = 0
+    var ii    : Int     = 0
+    var nf    : Int     = 0
+    var ipll  : Int     = 0
+    var nll   : Int     = n
+    var nq    : Int     = 0
+    var nr    : Int     = 0
+    var arg   : Double  = 0.0
+    var ido   : Int     = 0
+    var ipm   : Int     = 0
+
+    j = 0
+    // factorize_loop
+    var _continue_factorize_loop = false
+    while ({
       j += 1
       if (j <= 4) {
         ntry = factors(j - 1)
-      }
-      else {
+      } else {
         ntry += 2
       }
-      do {
-        {
-          nq = nll / ntry
-          nr = nll - ntry * nq
-          if (nr != 0) {
-            ??? // continue factorize_loop //todo: continue is not supported
 
-          }
+      while ({
+        nq = nll / ntry
+        nr = nll - ntry * nq
+        if (nr != 0) {
+          _continue_factorize_loop = true
+        } else {
           nf += 1
           wtable(nf + 1 + fourn) = ntry
           nll = nq
           if (ntry == 2 && nf != 1) {
             i = 2
-            while ( {
-              i <= nf
-            }) {
+            while (i <= nf) {
               ib = nf - i + 2
               val idx: Int = ib + fourn
               wtable(idx + 1) = wtable(idx)
@@ -857,56 +837,52 @@ final class DoubleFFT_1D private (
             wtable(2 + fourn) = 2
           }
         }
-      } while ( {
-        nll != 1
-      })
-      ??? // break //todo: break is not supported
 
-    }
+        !_continue_factorize_loop && nll != 1
+      }) ()
 
-    wtable(fourn) = n
+      _continue_factorize_loop
+    }) ()
+
+    wtable(fourn)     = n
     wtable(1 + fourn) = nf
     argh = TWO_PI / n.toDouble
-    i = 1
-    l1 = 1
-    k1 = 1
-    while ( {
-      k1 <= nf
-    }) {
-      ipll = wtable(k1 + 1 + fourn).toInt
-      ld = 0
-      l2 = l1 * ipll
-      ido = n / l2
-      idot = ido + ido + 2
-      ipm = ipll - 1
+    i   = 1
+    l1  = 1
+    k1  = 1
+    while (k1 <= nf) {
+      ipll  = wtable(k1 + 1 + fourn).toInt
+      ld    = 0
+      l2    = l1 * ipll
+      ido   = n / l2
+      idot  = ido + ido + 2
+      ipm   = ipll - 1
+
       j = 1
-      while ( {
-        j <= ipm
-      }) {
+      while (j <= ipm) {
         i1 = i
-        wtable(i - 1 + twon) = 1
-        wtable(i + twon) = 0
+        wtable(i - 1  + twon) = 1
+        wtable(i      + twon) = 0
         ld += l1
         fi = 0
         argld = ld * argh
+
         ii = 4
-        while ( {
-          ii <= idot
-        }) {
-          i += 2
+        while (ii <= idot) {
+          i  += 2
           fi += 1
           arg = fi * argld
           val idx: Int = i + twon
           wtable(idx - 1) = cos(arg)
-          wtable(idx) = sin(arg)
+          wtable(idx    ) = sin(arg)
 
           ii += 2
         }
         if (ipll > 5) {
-          val idx1: Int = i1 + twon
-          val idx2: Int = i + twon
-          wtable(idx1 - 1) = wtable(idx2 - 1)
-          wtable(idx1) = wtable(idx2)
+          val idx1: Int = i1  + twon
+          val idx2: Int = i   + twon
+          wtable(idx1 - 1 ) = wtable(idx2 - 1)
+          wtable(idx1     ) = wtable(idx2)
         }
 
         j += 1
@@ -918,63 +894,55 @@ final class DoubleFFT_1D private (
   }
 
   private[fft] def rffti(): Unit = {
-    if (n == 1) {
-      return
-    }
-    val twon: Int = 2 * n
-    var argh: Double = .0
-    var ntry: Int = 0
-    var i: Int = 0
-    var j: Int = 0
-    var argld: Double = .0
-    var k1: Int = 0
-    var l1: Int = 0
-    var l2: Int = 0
-    var ib: Int = 0
-    var fi: Double = .0
-    var ld: Int = 0
-    var ii: Int = 0
-    var nf: Int = 0
-    var ipll: Int = 0
-    var nll: Int = 0
-    var is: Int = 0
-    var nq: Int = 0
-    var nr: Int = 0
-    var arg: Double = .0
-    var ido: Int = 0
-    var ipm: Int = 0
-    var nfm1: Int = 0
-    nll = n
-    nf = 0
-    j = 0
+    if (n == 1) return
 
-    ??? // factorize_loop //todo: labels are not supported
-    while ( {
-      true
-    }) {
+    val twon  : Int     = 2 * n
+    var argh  : Double  = 0.0
+    var ntry  : Int     = 0
+    var i     : Int     = 0
+    var j     : Int     = 0
+    var argld : Double  = 0.0
+    var k1    : Int     = 0
+    var l1    : Int     = 0
+    var l2    : Int     = 0
+    var ib    : Int     = 0
+    var fi    : Double  = 0.0
+    var ld    : Int     = 0
+    var ii    : Int     = 0
+    var nf    : Int     = 0
+    var ipll  : Int     = 0
+    var nll   : Int     = n
+    var is    : Int     = 0
+    var nq    : Int     = 0
+    var nr    : Int     = 0
+    var arg   : Double  = 0.0
+    var ido   : Int     = 0
+    var ipm   : Int     = 0
+    var nfm1  : Int     = 0
+
+    j = 0
+    // factorize_loop
+    var _continue_factorize_loop = false
+    while ({
       j += 1
       if (j <= 4) {
         ntry = factors(j - 1)
-      }
-      else {
+      } else {
         ntry += 2
       }
-      do {
-        {
-          nq = nll / ntry
-          nr = nll - ntry * nq
-          if (nr != 0) {
-            ??? // continue factorize_loop //todo: continue is not supported
 
-          }
+      while ({
+        nq = nll / ntry
+        nr = nll - ntry * nq
+        if (nr != 0) {
+          _continue_factorize_loop = true
+        } else {
           nf += 1
           wtable_r(nf + 1 + twon) = ntry
           nll = nq
           if (ntry == 2 && nf != 1) {
             i = 2
-            while ( {
-              i <= nf
-            }) {
+            while (i <= nf) {
               ib = nf - i + 2
               val idx: Int = ib + twon
               wtable_r(idx + 1) = wtable_r(idx)
@@ -984,12 +952,12 @@ final class DoubleFFT_1D private (
             wtable_r(2 + twon) = 2
           }
         }
-      } while ( {
-        nll != 1
-      })
-      ??? // break //todo: break is not supported
 
-    }
+        !_continue_factorize_loop && nll != 1
+      }) ()
+
+      _continue_factorize_loop
+    }) ()
 
     wtable_r(twon) = n
     wtable_r(1 + twon) = nf
@@ -1804,15 +1772,16 @@ final class DoubleFFT_1D private (
      --------------------------------------------------------*/
   private[fft] def rfftf(a: Array[Double], offa: Int): Unit = {
     if (n == 1) return
-    var l1 = 0
-    var l2 = 0
-    var na = 0
-    var kh = 0
-    var nf = 0
-    var ipll = 0
-    var iw = 0
-    var ido = 0
-    var idl1 = 0
+
+    var l1    = 0
+    var l2    = 0
+    var na    = 0
+    var kh    = 0
+    var nf    = 0
+    var ipll  = 0
+    var iw    = 0
+    var ido   = 0
+    var idl1  = 0
     val ch = new Array[Double](n)
     val twon = 2 * n
     nf = wtable_r(1 + twon).toInt
