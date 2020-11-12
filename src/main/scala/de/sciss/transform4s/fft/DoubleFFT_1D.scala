@@ -24,18 +24,15 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * ***** END LICENSE BLOCK ***** */
+
 package de.sciss.transform4s.fft
 
-import java.util.concurrent.Future
+import java.util.concurrent.{ExecutionException, Future}
+import java.util.logging.{Level, Logger}
 
-import org.jtransforms.utils.CommonUtils
-import java.util.concurrent.ExecutionException
-import java.util.logging.Level
-import java.util.logging.Logger
-
-import pl.edu.icm.jlargearrays.ConcurrencyUtils
 import org.apache.commons.math3.util.FastMath._
-
+import org.jtransforms.utils.CommonUtils
+import pl.edu.icm.jlargearrays.ConcurrencyUtils
 
 /**
  * Computes 1D Discrete Fourier Transform (DFT) of complex and real, double
@@ -50,79 +47,95 @@ import org.apache.commons.math3.util.FastMath._
  * @author Piotr Wendykier (piotr.wendykier@gmail.com)
  */
 object DoubleFFT_1D {
-  private type Plans = Int
   private final val SPLIT_RADIX = 0
   private final val MIXED_RADIX = 1
   private final val BLUESTEIN   = 2
 
-  private val factors = Array(4, 2, 3, 5)
-  private val PI      = 3.14159265358979311599796346854418516
-  private val TWO_PI  = 6.28318530717958623199592693708837032
-}
+  private final val factors     = Array(4, 2, 3, 5)
+  private final val PI          = 3.14159265358979311599796346854418516
+  private final val TWO_PI      = 6.28318530717958623199592693708837032
 
-final class DoubleFFT_1D(n0: Int) {
-  import DoubleFFT_1D._
+  def apply(n: Int): DoubleFFT_1D = {
+    if (n < 1) throw new IllegalArgumentException("n must be greater than 0")
 
-  private var n = 0
+    var nBluestein: Int           = 0
+    var ip        : Array[Int]    = null
+    var w         : Array[Double] = null
+    var nw        : Int           = 0
+    var nc        : Int           = 0
+    var wtable    : Array[Double] = null
+    var wtable_r  : Array[Double] = null
+    var bk1       : Array[Double] = null
+    var bk2       : Array[Double] = null
+    var plan      : Int           = 0
 
-  private var nBluestein = 0
-
-  private var ip: Array[Int] = null
-
-  private var w: Array[Double] = null
-
-  private var nw = 0
-
-  private var nc = 0
-
-  private var wtable: Array[Double] = null
-
-  private var wtable_r: Array[Double] = null
-
-  private var bk1: Array[Double] = null
-
-  private var bk2: Array[Double] = null
-
-  private var plan: Plans = 0
-
-  // constructor
-
-  {
-    if (n0 < 1) throw new IllegalArgumentException("n must be greater than 0")
-    this.n    = n0
-
-    if (!CommonUtils.isPowerOf2(n0)) {
-      if (CommonUtils.getReminder(n0, factors) >= 211) {
+    if (!CommonUtils.isPowerOf2(n)) {
+      if (CommonUtils.getReminder(n, factors) >= 211) {
         plan        = BLUESTEIN
-        nBluestein  = CommonUtils.nextPow2(this.n * 2 - 1)
+        nBluestein  = CommonUtils.nextPow2(n * 2 - 1)
         bk1         = new Array[Double](2 * nBluestein)
         bk2         = new Array[Double](2 * nBluestein)
-        this.ip     = new Array[Int](2 + ceil(2 + (1 << (log(nBluestein + 0.5) / log(2)).toInt / 2)).toInt)
-        this.w      = new Array[Double](nBluestein)
+        ip          = new Array[Int](2 + ceil(2 + (1 << (log(nBluestein + 0.5) / log(2)).toInt / 2)).toInt)
+        w           = new Array[Double](nBluestein)
         val twon    = 2 * nBluestein
         nw          = twon >> 2
         CommonUtils.makewt(nw, ip, w)
         nc          = nBluestein >> 2
         CommonUtils.makect(nc, w, nw, ip)
-        bluesteini()
-      }
-      else {
+
+      } else {
         plan        = MIXED_RADIX
-        wtable      = new Array[Double](4 * this.n + 15)
-        wtable_r    = new Array[Double](2 * this.n + 15)
-        cffti()
-        rffti()
+        wtable      = new Array[Double](4 * n + 15)
+        wtable_r    = new Array[Double](2 * n + 15)
       }
     } else {
       plan          = SPLIT_RADIX
-      this.ip       = new Array[Int](2 + ceil(2 + (1 << (log(n0 + 0.5) / log(2)).toInt / 2)).toInt)
-      this.w        = new Array[Double](this.n)
-      val twon      = 2 * this.n
+      ip            = new Array[Int](2 + ceil(2 + (1 << (log(n + 0.5) / log(2)).toInt / 2)).toInt)
+      w             = new Array[Double](n)
+      val twon      = 2 * n
       nw            = twon >> 2
       CommonUtils.makewt(nw, ip, w)
-      nc            = this.n >> 2
+      nc            = n >> 2
       CommonUtils.makect(nc, w, nw, ip)
     }
+
+    new DoubleFFT_1D(
+      n           = n         ,
+      nBluestein  = nBluestein,
+      ip          = ip        ,
+      w           = w         ,
+      nw          = nw        ,
+      nc          = nc        ,
+      wtable      = wtable    ,
+      wtable_r    = wtable_r  ,
+      bk1         = bk1       ,
+      bk2         = bk2       ,
+      plan        = plan      ,
+    )
+  }
+}
+
+final class DoubleFFT_1D private (
+                                   n          : Int,
+                                   nBluestein : Int,
+                                   ip         : Array[Int],
+                                   w          : Array[Double],
+                                   nw         : Int,
+                                   nc         : Int,
+                                   wtable     : Array[Double],
+                                   wtable_r   : Array[Double],
+                                   bk1        : Array[Double],
+                                   bk2        : Array[Double],
+                                   plan       : Int,
+                        ) {
+  import DoubleFFT_1D._
+
+  // ---- init ----
+  if (plan == BLUESTEIN) {
+    bluesteini()
+  } else if (plan == MIXED_RADIX) {
+    cffti()
+    rffti()
   }
 
   /**
@@ -980,7 +993,7 @@ final class DoubleFFT_1D(n0: Int) {
 
     wtable_r(twon) = n
     wtable_r(1 + twon) = nf
-    argh = TWO_PI / (n).toDouble
+    argh = TWO_PI / n.toDouble
     is = 0
     nfm1 = nf - 1
     l1 = 1
@@ -1071,7 +1084,7 @@ final class DoubleFFT_1D(n0: Int) {
       var k: Int = n / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           n
         }
         else {
@@ -1096,7 +1109,7 @@ final class DoubleFFT_1D(n0: Int) {
                 val idx3: Int = offa + idx1
                 val idx4: Int = offa + idx2
                 ak(idx1) = a(idx3) * bk1(idx1) + a(idx4) * bk1(idx2)
-                ak(idx2) = -(a(idx3)) * bk1(idx2) + a(idx4) * bk1(idx1)
+                ak(idx2) = -a(idx3) * bk1(idx2) + a(idx4) * bk1(idx1)
               }
             }
           }
@@ -1113,7 +1126,7 @@ final class DoubleFFT_1D(n0: Int) {
       k = nBluestein / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           nBluestein
         }
         else {
@@ -1125,7 +1138,7 @@ final class DoubleFFT_1D(n0: Int) {
               for (i <- firstIdx until lastIdx) {
                 val idx1: Int = 2 * i
                 val idx2: Int = idx1 + 1
-                val im: Double = -(ak(idx1)) * bk2(idx2) + ak(idx2) * bk2(idx1)
+                val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
                 ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
                 ak(idx2) = im
               }
@@ -1153,7 +1166,7 @@ final class DoubleFFT_1D(n0: Int) {
       k = n / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           n
         }
         else {
@@ -1178,7 +1191,7 @@ final class DoubleFFT_1D(n0: Int) {
                 val idx3: Int = offa + idx1
                 val idx4: Int = offa + idx2
                 a(idx3) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
-                a(idx4) = -(bk1(idx2)) * ak(idx1) + bk1(idx1) * ak(idx2)
+                a(idx4) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
               }
             }
           }
@@ -1210,7 +1223,7 @@ final class DoubleFFT_1D(n0: Int) {
           val idx3: Int = offa + idx1
           val idx4: Int = offa + idx2
           ak(idx1) = a(idx3) * bk1(idx1) + a(idx4) * bk1(idx2)
-          ak(idx2) = -(a(idx3)) * bk1(idx2) + a(idx4) * bk1(idx1)
+          ak(idx2) = -a(idx3) * bk1(idx2) + a(idx4) * bk1(idx1)
         }
       }
       CommonUtils.cftbsub(2 * nBluestein, ak, 0, ip, nw, w)
@@ -1218,7 +1231,7 @@ final class DoubleFFT_1D(n0: Int) {
         for (i <- 0 until nBluestein) {
           val idx1: Int = 2 * i
           val idx2: Int = idx1 + 1
-          val im: Double = -(ak(idx1)) * bk2(idx2) + ak(idx2) * bk2(idx1)
+          val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
           ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
           ak(idx2) = im
         }
@@ -1250,7 +1263,7 @@ final class DoubleFFT_1D(n0: Int) {
           val idx3: Int = offa + idx1
           val idx4: Int = offa + idx2
           a(idx3) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
-          a(idx4) = -(bk1(idx2)) * ak(idx1) + bk1(idx1) * ak(idx2)
+          a(idx4) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
         }
       }
     }
@@ -1268,7 +1281,7 @@ final class DoubleFFT_1D(n0: Int) {
       var k: Int = n / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           n
         }
         else {
@@ -1291,7 +1304,7 @@ final class DoubleFFT_1D(n0: Int) {
                 val idx2: Int = idx1 + 1
                 val idx3: Int = offa + i
                 ak(idx1) = a(idx3) * bk1(idx1)
-                ak(idx2) = -(a(idx3)) * bk1(idx2)
+                ak(idx2) = -a(idx3) * bk1(idx2)
               }
             }
           }
@@ -1308,7 +1321,7 @@ final class DoubleFFT_1D(n0: Int) {
       k = nBluestein / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           nBluestein
         }
         else {
@@ -1320,7 +1333,7 @@ final class DoubleFFT_1D(n0: Int) {
               for (i <- firstIdx until lastIdx) {
                 val idx1: Int = 2 * i
                 val idx2: Int = idx1 + 1
-                val im: Double = -(ak(idx1)) * bk2(idx2) + ak(idx2) * bk2(idx1)
+                val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
                 ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
                 ak(idx2) = im
               }
@@ -1348,7 +1361,7 @@ final class DoubleFFT_1D(n0: Int) {
       k = n / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           n
         }
         else {
@@ -1369,7 +1382,7 @@ final class DoubleFFT_1D(n0: Int) {
                 val idx1: Int = 2 * i
                 val idx2: Int = idx1 + 1
                 a(offa + idx1) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
-                a(offa + idx2) = -(bk1(idx2)) * ak(idx1) + bk1(idx1) * ak(idx2)
+                a(offa + idx2) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
               }
             }
           }
@@ -1399,7 +1412,7 @@ final class DoubleFFT_1D(n0: Int) {
           val idx2: Int = idx1 + 1
           val idx3: Int = offa + i
           ak(idx1) = a(idx3) * bk1(idx1)
-          ak(idx2) = -(a(idx3)) * bk1(idx2)
+          ak(idx2) = -a(idx3) * bk1(idx2)
         }
       }
       CommonUtils.cftbsub(2 * nBluestein, ak, 0, ip, nw, w)
@@ -1407,7 +1420,7 @@ final class DoubleFFT_1D(n0: Int) {
         for (i <- 0 until nBluestein) {
           val idx1: Int = 2 * i
           val idx2: Int = idx1 + 1
-          val im: Double = -(ak(idx1)) * bk2(idx2) + ak(idx2) * bk2(idx1)
+          val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
           ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
           ak(idx2) = im
         }
@@ -1435,7 +1448,7 @@ final class DoubleFFT_1D(n0: Int) {
           val idx1: Int = 2 * i
           val idx2: Int = idx1 + 1
           a(offa + idx1) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
-          a(offa + idx2) = -(bk1(idx2)) * ak(idx1) + bk1(idx1) * ak(idx2)
+          a(offa + idx2) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
         }
       }
     }
@@ -1453,7 +1466,7 @@ final class DoubleFFT_1D(n0: Int) {
       var k: Int = n / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           n
         }
         else {
@@ -1466,7 +1479,7 @@ final class DoubleFFT_1D(n0: Int) {
               val idx2: Int = idx1 + 1
               val idx3: Int = offa + i
               ak(idx1) = a(idx3) * bk1(idx1)
-              ak(idx2) = -(a(idx3)) * bk1(idx2)
+              ak(idx2) = -a(idx3) * bk1(idx2)
             }
           }
         })
@@ -1482,7 +1495,7 @@ final class DoubleFFT_1D(n0: Int) {
       k = nBluestein / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           nBluestein
         }
         else {
@@ -1514,7 +1527,7 @@ final class DoubleFFT_1D(n0: Int) {
         val idx2: Int = idx1 + 1
         val idx3: Int = offa + i
         ak(idx1) = a(idx3) * bk1(idx1)
-        ak(idx2) = -(a(idx3)) * bk1(idx2)
+        ak(idx2) = -a(idx3) * bk1(idx2)
       }
       CommonUtils.cftbsub(2 * nBluestein, ak, 0, ip, nw, w)
       for (i <- 0 until nBluestein) {
@@ -1533,17 +1546,17 @@ final class DoubleFFT_1D(n0: Int) {
         val idx1: Int = 2 * i
         val idx2: Int = idx1 + 1
         a(offa + idx1) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
-        a(offa + idx2) = -(bk1(idx2)) * ak(idx1) + bk1(idx1) * ak(idx2)
+        a(offa + idx2) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
       }
     }
     else {
       a(offa) = bk1(0) * ak(0) + bk1(1) * ak(1)
-      a(offa + 1) = -(bk1(n)) * ak(n - 1) + bk1(n - 1) * ak(n)
+      a(offa + 1) = -bk1(n) * ak(n - 1) + bk1(n - 1) * ak(n)
       for (i <- 1 until (n - 1) / 2) {
         val idx1: Int = 2 * i
         val idx2: Int = idx1 + 1
         a(offa + idx1) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
-        a(offa + idx2) = -(bk1(idx2)) * ak(idx1) + bk1(idx1) * ak(idx2)
+        a(offa + idx2) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
       }
       a(offa + n - 1) = bk1(n - 1) * ak(n - 1) + bk1(n) * ak(n)
     }
@@ -1608,7 +1621,7 @@ final class DoubleFFT_1D(n0: Int) {
       var k: Int = nBluestein / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           nBluestein
         }
         else {
@@ -1619,7 +1632,7 @@ final class DoubleFFT_1D(n0: Int) {
             for (i <- firstIdx until lastIdx) {
               val idx1: Int = 2 * i
               val idx2: Int = idx1 + 1
-              val im: Double = -(ak(idx1)) * bk2(idx2) + ak(idx2) * bk2(idx1)
+              val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
               ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
               ak(idx2) = im
             }
@@ -1637,7 +1650,7 @@ final class DoubleFFT_1D(n0: Int) {
       k = n / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           n
         }
         else {
@@ -1665,7 +1678,7 @@ final class DoubleFFT_1D(n0: Int) {
       for (i <- 0 until nBluestein) {
         val idx1: Int = 2 * i
         val idx2: Int = idx1 + 1
-        val im: Double = -(ak(idx1)) * bk2(idx2) + ak(idx2) * bk2(idx1)
+        val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
         ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
         ak(idx2) = im
       }
@@ -1690,7 +1703,7 @@ final class DoubleFFT_1D(n0: Int) {
       var k: Int = n / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           n
         }
         else {
@@ -1719,7 +1732,7 @@ final class DoubleFFT_1D(n0: Int) {
       k = nBluestein / nthreads
       for (i <- 0 until nthreads) {
         val firstIdx: Int = i * k
-        val lastIdx: Int = if ((i == (nthreads - 1))) {
+        val lastIdx: Int = if (i == (nthreads - 1)) {
           nBluestein
         }
         else {
@@ -1730,7 +1743,7 @@ final class DoubleFFT_1D(n0: Int) {
             for (i <- firstIdx until lastIdx) {
               val idx1: Int = 2 * i
               val idx2: Int = idx1 + 1
-              val im: Double = -(ak(idx1)) * bk2(idx2) + ak(idx2) * bk2(idx1)
+              val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
               ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
               ak(idx2) = im
             }
@@ -1757,7 +1770,7 @@ final class DoubleFFT_1D(n0: Int) {
       for (i <- 0 until nBluestein) {
         val idx1: Int = 2 * i
         val idx2: Int = idx1 + 1
-        val im: Double = -(ak(idx1)) * bk2(idx2) + ak(idx2) * bk2(idx1)
+        val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
         ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
         ak(idx2) = im
       }
