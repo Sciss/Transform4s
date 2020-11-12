@@ -10,8 +10,8 @@ lazy val commonJvmSettings = Seq(
 
 val ENABLE_JAVA = false
 
-lazy val root = project.in(file(".")) // crossProject(JSPlatform, JVMPlatform).in(file("."))
-  .settings(commonJvmSettings)
+lazy val root = crossProject(JSPlatform, JVMPlatform).in(file("."))
+  .jvmSettings(commonJvmSettings)
   .settings(
     name               := baseName,
     version            := projectVersion,
@@ -21,13 +21,6 @@ lazy val root = project.in(file(".")) // crossProject(JSPlatform, JVMPlatform).i
     homepage           := Some(url(s"https://github.com/Sciss/${name.value}")),
     licenses           := Seq("BSD 2-Clause" -> url("http://opensource.org/licenses/BSD-2-Clause")),
     mimaPreviousArtifacts := Set("de.sciss" %% baseNameL % mimaVersion),
-    libraryDependencies ++= {
-      if (!ENABLE_JAVA) Nil else Seq(
-        "org.apache.commons"  %   "commons-math3" % "3.5",
-        "pl.edu.icm"          %   "JLargeArrays"  % "1.5",
-        "junit"               %   "junit"         % "4.13.1" % Test,
-      )
-    },
     unmanagedSourceDirectories in Compile := {
       val all = (unmanagedSourceDirectories in Compile).value
       if (ENABLE_JAVA) all else all.filterNot(_.getPath.contains("java"))
@@ -46,6 +39,15 @@ lazy val root = project.in(file(".")) // crossProject(JSPlatform, JVMPlatform).i
       val sq0     = if (!isDotty && jdkGt8) List("-release", "8") else Nil
       if (sv.startsWith("2.12.")) sq0 else "-Wvalue-discard" :: sq0
     }, // JDK >8 breaks API; skip scala-doc
+  )
+  .jvmSettings(
+    libraryDependencies ++= {
+      if (!ENABLE_JAVA) Nil else Seq(
+        "org.apache.commons"  %   "commons-math3" % "3.5",
+        "pl.edu.icm"          %   "JLargeArrays"  % "1.5",
+        "junit"               %   "junit"         % "4.13.1" % Test,
+      )
+    }, 
   )
   .settings(publishSettings)
 
