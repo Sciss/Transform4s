@@ -34,8 +34,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
-import org.apache.commons.math3.util.FastMath
 
+import Math.max
 
 /**
  * Concurrency utilities.
@@ -62,7 +62,7 @@ object ConcurrencyUtils {
     private val DEFAULT_FACTORY = Executors.defaultThreadFactory
   }
 
-  private class CustomThreadFactory private[utils](val handler: Thread.UncaughtExceptionHandler) extends ThreadFactory {
+  private class CustomThreadFactory(val handler: Thread.UncaughtExceptionHandler) extends ThreadFactory {
     override def newThread(r: Runnable): Thread = {
       val t = CustomThreadFactory.DEFAULT_FACTORY.newThread(r)
       t.setUncaughtExceptionHandler(handler)
@@ -85,7 +85,7 @@ object ConcurrencyUtils {
    * @param concurrentThreshold minimum length of an array for which multiple threads are used
    */
   def setConcurrentThreshold(concurrentThreshold: Long): Unit = {
-    ConcurrencyUtils.concurrentThreshold = FastMath.max(1, concurrentThreshold)
+    ConcurrencyUtils.concurrentThreshold = max(1, concurrentThreshold)
   }
 
   /**
@@ -200,7 +200,4 @@ object ConcurrencyUtils {
         Thread.currentThread.interrupt()
     }
   }
-}
-
-class ConcurrencyUtils private() {
 }
