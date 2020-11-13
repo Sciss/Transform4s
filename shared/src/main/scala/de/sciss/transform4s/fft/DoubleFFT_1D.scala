@@ -27,12 +27,12 @@
 
 package de.sciss.transform4s.fft
 
-import java.util.concurrent.{ExecutionException, Future}
-import java.util.logging.{Level, Logger}
-
 import de.sciss.transform4s.utils.ConcurrencyUtils
+
+import scala.concurrent.Future
 //import org.apache.commons.math3.util.FastMath._
 import de.sciss.transform4s.utils.CommonUtils
+import ConcurrencyUtils.executionContext
 
 import Math.{sin, cos, ceil, log}
 
@@ -354,34 +354,26 @@ final class DoubleFFT_1D private (
     plan match {
       case SPLIT_RADIX =>
         realForward(a, offa)
-        val nthreads = ConcurrencyUtils.getNumberOfThreads
-        if ((nthreads > 1) && (n / 2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+        val nthreads = ConcurrencyUtils.numThreads
+        if ((nthreads > 1) && (n / 2 > CommonUtils.threadsBeginN_1D_FFT_2Threads)) {
           val futures = new Array[Future[_]](nthreads)
           val k = n / 2 / nthreads
           for (i <- 0 until nthreads) {
             val firstIdx = i * k
             val lastIdx = if (i == (nthreads - 1)) n / 2
             else firstIdx + k
-            futures(i) = ConcurrencyUtils.submit(new Runnable() {
-              override def run(): Unit = {
-                var idx1 = 0
-                var idx2 = 0
-                for (k <- firstIdx until lastIdx) {
-                  idx1 = 2 * k
-                  idx2 = offa + ((twon - idx1) % twon)
-                  a(idx2) = a(offa + idx1)
-                  a(idx2 + 1) = -a(offa + idx1 + 1)
-                }
+            futures(i) = Future {
+              var idx1 = 0
+              var idx2 = 0
+              for (k <- firstIdx until lastIdx) {
+                idx1 = 2 * k
+                idx2 = offa + ((twon - idx1) % twon)
+                a(idx2) = a(offa + idx1)
+                a(idx2 + 1) = -a(offa + idx1 + 1)
               }
-            })
+            }
           }
-          try ConcurrencyUtils.waitForCompletion(futures)
-          catch {
-            case ex: InterruptedException =>
-              Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-            case ex: ExecutionException =>
-              Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-          }
+          ConcurrencyUtils.waitForCompletion(futures)
         }
         else {
           var idx1 = 0
@@ -540,34 +532,26 @@ final class DoubleFFT_1D private (
     plan match {
       case SPLIT_RADIX =>
         realInverse2(a, offa, scale)
-        val nthreads = ConcurrencyUtils.getNumberOfThreads
-        if ((nthreads > 1) && (n / 2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+        val nthreads = ConcurrencyUtils.numThreads
+        if ((nthreads > 1) && (n / 2 > CommonUtils.threadsBeginN_1D_FFT_2Threads)) {
           val futures = new Array[Future[_]](nthreads)
           val k = n / 2 / nthreads
           for (i <- 0 until nthreads) {
             val firstIdx = i * k
             val lastIdx = if (i == (nthreads - 1)) n / 2
             else firstIdx + k
-            futures(i) = ConcurrencyUtils.submit(new Runnable() {
-              override def run(): Unit = {
-                var idx1 = 0
-                var idx2 = 0
-                for (k <- firstIdx until lastIdx) {
-                  idx1 = 2 * k
-                  idx2 = offa + ((twon - idx1) % twon)
-                  a(idx2) = a(offa + idx1)
-                  a(idx2 + 1) = -a(offa + idx1 + 1)
-                }
+            futures(i) = Future {
+              var idx1 = 0
+              var idx2 = 0
+              for (k <- firstIdx until lastIdx) {
+                idx1 = 2 * k
+                idx2 = offa + ((twon - idx1) % twon)
+                a(idx2) = a(offa + idx1)
+                a(idx2 + 1) = -a(offa + idx1 + 1)
               }
-            })
+            }
           }
-          try ConcurrencyUtils.waitForCompletion(futures)
-          catch {
-            case ex: InterruptedException =>
-              Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-            case ex: ExecutionException =>
-              Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-          }
+          ConcurrencyUtils.waitForCompletion(futures)
         }
         else {
           var idx1 = 0
@@ -1044,10 +1028,10 @@ final class DoubleFFT_1D private (
 
   private def bluestein_complex(a: Array[Double], offa: Int, isign: Int): Unit = {
     val ak: Array[Double] = new Array[Double](2 * nBluestein)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+    val threads: Int = ConcurrencyUtils.numThreads
+    if ((threads > 1) && (n >= CommonUtils.threadsBeginN_1D_FFT_2Threads)) {
       var nthreads: Int = 2
-      if ((threads >= 4) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
+      if ((threads >= 4) && (n >= CommonUtils.threadsBeginN_1D_FFT_4Threads)) {
         nthreads = 4
       }
       val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
@@ -1060,38 +1044,30 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val idx3: Int = offa + idx1
-                val idx4: Int = offa + idx2
-                ak(idx1) = a(idx3) * bk1(idx1) - a(idx4) * bk1(idx2)
-                ak(idx2) = a(idx3) * bk1(idx2) + a(idx4) * bk1(idx1)
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val idx3: Int = offa + idx1
-                val idx4: Int = offa + idx2
-                ak(idx1) = a(idx3) * bk1(idx1) + a(idx4) * bk1(idx2)
-                ak(idx2) = -a(idx3) * bk1(idx2) + a(idx4) * bk1(idx1)
-              }
+        futures(i) = Future {
+          if (isign > 0) {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val idx3: Int = offa + idx1
+              val idx4: Int = offa + idx2
+              ak(idx1) = a(idx3) * bk1(idx1) - a(idx4) * bk1(idx2)
+              ak(idx2) = a(idx3) * bk1(idx2) + a(idx4) * bk1(idx1)
             }
           }
-        })
+          else {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val idx3: Int = offa + idx1
+              val idx4: Int = offa + idx2
+              ak(idx1) = a(idx3) * bk1(idx1) + a(idx4) * bk1(idx2)
+              ak(idx2) = -a(idx3) * bk1(idx2) + a(idx4) * bk1(idx1)
+            }
+          }
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
       CommonUtils.cftbsub(2 * nBluestein, ak, 0, ip, nw, w)
       k = nBluestein / nthreads
       for (i <- 0 until nthreads) {
@@ -1102,36 +1078,28 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
-                ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
-                ak(idx2) = im
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val im: Double = ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
-                ak(idx1) = ak(idx1) * bk2(idx1) - ak(idx2) * bk2(idx2)
-                ak(idx2) = im
-              }
+        futures(i) = Future {
+          if (isign > 0) {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
+              ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
+              ak(idx2) = im
             }
           }
-        })
+          else {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val im: Double = ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
+              ak(idx1) = ak(idx1) * bk2(idx1) - ak(idx2) * bk2(idx2)
+              ak(idx2) = im
+            }
+          }
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
       CommonUtils.cftfsub(2 * nBluestein, ak, 0, ip, nw, w)
       k = n / nthreads
       for (i <- 0 until nthreads) {
@@ -1142,38 +1110,30 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val idx3: Int = offa + idx1
-                val idx4: Int = offa + idx2
-                a(idx3) = bk1(idx1) * ak(idx1) - bk1(idx2) * ak(idx2)
-                a(idx4) = bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val idx3: Int = offa + idx1
-                val idx4: Int = offa + idx2
-                a(idx3) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
-                a(idx4) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
-              }
+        futures(i) = Future {
+          if (isign > 0) {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val idx3: Int = offa + idx1
+              val idx4: Int = offa + idx2
+              a(idx3) = bk1(idx1) * ak(idx1) - bk1(idx2) * ak(idx2)
+              a(idx4) = bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
             }
           }
-        })
+          else {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val idx3: Int = offa + idx1
+              val idx4: Int = offa + idx2
+              a(idx3) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
+              a(idx4) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
+            }
+          }
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
     }
     else {
       if (isign > 0) {
@@ -1241,10 +1201,10 @@ final class DoubleFFT_1D private (
 
   private def bluestein_real_full(a: Array[Double], offa: Int, isign: Int): Unit = {
     val ak: Array[Double] = new Array[Double](2 * nBluestein)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+    val threads: Int = ConcurrencyUtils.numThreads
+    if ((threads > 1) && (n >= CommonUtils.threadsBeginN_1D_FFT_2Threads)) {
       var nthreads: Int = 2
-      if ((threads >= 4) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
+      if ((threads >= 4) && (n >= CommonUtils.threadsBeginN_1D_FFT_4Threads)) {
         nthreads = 4
       }
       val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
@@ -1257,36 +1217,28 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val idx3: Int = offa + i
-                ak(idx1) = a(idx3) * bk1(idx1)
-                ak(idx2) = a(idx3) * bk1(idx2)
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val idx3: Int = offa + i
-                ak(idx1) = a(idx3) * bk1(idx1)
-                ak(idx2) = -a(idx3) * bk1(idx2)
-              }
+        futures(i) = Future {
+          if (isign > 0) {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val idx3: Int = offa + i
+              ak(idx1) = a(idx3) * bk1(idx1)
+              ak(idx2) = a(idx3) * bk1(idx2)
             }
           }
-        })
+          else {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val idx3: Int = offa + i
+              ak(idx1) = a(idx3) * bk1(idx1)
+              ak(idx2) = -a(idx3) * bk1(idx2)
+            }
+          }
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
       CommonUtils.cftbsub(2 * nBluestein, ak, 0, ip, nw, w)
       k = nBluestein / nthreads
       for (i <- 0 until nthreads) {
@@ -1297,36 +1249,28 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
-                ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
-                ak(idx2) = im
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                val im: Double = ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
-                ak(idx1) = ak(idx1) * bk2(idx1) - ak(idx2) * bk2(idx2)
-                ak(idx2) = im
-              }
+        futures(i) = Future {
+          if (isign > 0) {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
+              ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
+              ak(idx2) = im
             }
           }
-        })
+          else {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              val im: Double = ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
+              ak(idx1) = ak(idx1) * bk2(idx1) - ak(idx2) * bk2(idx2)
+              ak(idx2) = im
+            }
+          }
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
       CommonUtils.cftfsub(2 * nBluestein, ak, 0, ip, nw, w)
       k = n / nthreads
       for (i <- 0 until nthreads) {
@@ -1337,34 +1281,26 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            if (isign > 0) {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                a(offa + idx1) = bk1(idx1) * ak(idx1) - bk1(idx2) * ak(idx2)
-                a(offa + idx2) = bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
-              }
-            }
-            else {
-              for (i <- firstIdx until lastIdx) {
-                val idx1: Int = 2 * i
-                val idx2: Int = idx1 + 1
-                a(offa + idx1) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
-                a(offa + idx2) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
-              }
+        futures(i) = Future {
+          if (isign > 0) {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              a(offa + idx1) = bk1(idx1) * ak(idx1) - bk1(idx2) * ak(idx2)
+              a(offa + idx2) = bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
             }
           }
-        })
+          else {
+            for (i <- firstIdx until lastIdx) {
+              val idx1: Int = 2 * i
+              val idx2: Int = idx1 + 1
+              a(offa + idx1) = bk1(idx1) * ak(idx1) + bk1(idx2) * ak(idx2)
+              a(offa + idx2) = -bk1(idx2) * ak(idx1) + bk1(idx1) * ak(idx2)
+            }
+          }
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
     }
     else {
       if (isign > 0) {
@@ -1426,10 +1362,10 @@ final class DoubleFFT_1D private (
 
   private def bluestein_real_forward(a: Array[Double], offa: Int): Unit = {
     val ak: Array[Double] = new Array[Double](2 * nBluestein)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+    val threads: Int = ConcurrencyUtils.numThreads
+    if ((threads > 1) && (n >= CommonUtils.threadsBeginN_1D_FFT_2Threads)) {
       var nthreads: Int = 2
-      if ((threads >= 4) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
+      if ((threads >= 4) && (n >= CommonUtils.threadsBeginN_1D_FFT_4Threads)) {
         nthreads = 4
       }
       val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
@@ -1442,25 +1378,17 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Int = 2 * i
-              val idx2: Int = idx1 + 1
-              val idx3: Int = offa + i
-              ak(idx1) = a(idx3) * bk1(idx1)
-              ak(idx2) = -a(idx3) * bk1(idx2)
-            }
+        futures(i) = Future {
+          for (i <- firstIdx until lastIdx) {
+            val idx1: Int = 2 * i
+            val idx2: Int = idx1 + 1
+            val idx3: Int = offa + i
+            ak(idx1) = a(idx3) * bk1(idx1)
+            ak(idx2) = -a(idx3) * bk1(idx2)
           }
-        })
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
       CommonUtils.cftbsub(2 * nBluestein, ak, 0, ip, nw, w)
       k = nBluestein / nthreads
       for (i <- 0 until nthreads) {
@@ -1471,25 +1399,17 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Int = 2 * i
-              val idx2: Int = idx1 + 1
-              val im: Double = ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
-              ak(idx1) = ak(idx1) * bk2(idx1) - ak(idx2) * bk2(idx2)
-              ak(idx2) = im
-            }
+        futures(i) = Future {
+          for (i <- firstIdx until lastIdx) {
+            val idx1: Int = 2 * i
+            val idx2: Int = idx1 + 1
+            val im: Double = ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
+            ak(idx1) = ak(idx1) * bk2(idx1) - ak(idx2) * bk2(idx2)
+            ak(idx2) = im
           }
-        })
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
     }
     else {
       for (i <- 0 until n) {
@@ -1581,10 +1501,10 @@ final class DoubleFFT_1D private (
       }
     }
     CommonUtils.cftbsub(2 * nBluestein, ak, 0, ip, nw, w)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+    val threads: Int = ConcurrencyUtils.numThreads
+    if ((threads > 1) && (n >= CommonUtils.threadsBeginN_1D_FFT_2Threads)) {
       var nthreads: Int = 2
-      if ((threads >= 4) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
+      if ((threads >= 4) && (n >= CommonUtils.threadsBeginN_1D_FFT_4Threads)) {
         nthreads = 4
       }
       val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
@@ -1597,25 +1517,17 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Int = 2 * i
-              val idx2: Int = idx1 + 1
-              val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
-              ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
-              ak(idx2) = im
-            }
+        futures(i) = Future {
+          for (i <- firstIdx until lastIdx) {
+            val idx1: Int = 2 * i
+            val idx2: Int = idx1 + 1
+            val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
+            ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
+            ak(idx2) = im
           }
-        })
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
       CommonUtils.cftfsub(2 * nBluestein, ak, 0, ip, nw, w)
       k = n / nthreads
       for (i <- 0 until nthreads) {
@@ -1626,23 +1538,15 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Int = 2 * i
-              val idx2: Int = idx1 + 1
-              a(offa + i) = bk1(idx1) * ak(idx1) - bk1(idx2) * ak(idx2)
-            }
+        futures(i) = Future {
+          for (i <- firstIdx until lastIdx) {
+            val idx1: Int = 2 * i
+            val idx2: Int = idx1 + 1
+            a(offa + i) = bk1(idx1) * ak(idx1) - bk1(idx2) * ak(idx2)
           }
-        })
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
     }
     else {
       for (i <- 0 until nBluestein) {
@@ -1663,10 +1567,10 @@ final class DoubleFFT_1D private (
 
   private def bluestein_real_inverse2(a: Array[Double], offa: Int): Unit = {
     val ak: Array[Double] = new Array[Double](2 * nBluestein)
-    val threads: Int = ConcurrencyUtils.getNumberOfThreads
-    if ((threads > 1) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+    val threads: Int = ConcurrencyUtils.numThreads
+    if ((threads > 1) && (n >= CommonUtils.threadsBeginN_1D_FFT_2Threads)) {
       var nthreads: Int = 2
-      if ((threads >= 4) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_4Threads)) {
+      if ((threads >= 4) && (n >= CommonUtils.threadsBeginN_1D_FFT_4Threads)) {
         nthreads = 4
       }
       val futures: Array[Future[_]] = new Array[Future[_]](nthreads)
@@ -1679,25 +1583,17 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Int = 2 * i
-              val idx2: Int = idx1 + 1
-              val idx3: Int = offa + i
-              ak(idx1) = a(idx3) * bk1(idx1)
-              ak(idx2) = a(idx3) * bk1(idx2)
-            }
+        futures(i) = Future {
+          for (i <- firstIdx until lastIdx) {
+            val idx1: Int = 2 * i
+            val idx2: Int = idx1 + 1
+            val idx3: Int = offa + i
+            ak(idx1) = a(idx3) * bk1(idx1)
+            ak(idx2) = a(idx3) * bk1(idx2)
           }
-        })
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
       CommonUtils.cftbsub(2 * nBluestein, ak, 0, ip, nw, w)
       k = nBluestein / nthreads
       for (i <- 0 until nthreads) {
@@ -1708,25 +1604,17 @@ final class DoubleFFT_1D private (
         else {
           firstIdx + k
         }
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              val idx1: Int = 2 * i
-              val idx2: Int = idx1 + 1
-              val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
-              ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
-              ak(idx2) = im
-            }
+        futures(i) = Future {
+          for (i <- firstIdx until lastIdx) {
+            val idx1: Int = 2 * i
+            val idx2: Int = idx1 + 1
+            val im: Double = -ak(idx1) * bk2(idx2) + ak(idx2) * bk2(idx1)
+            ak(idx1) = ak(idx1) * bk2(idx1) + ak(idx2) * bk2(idx2)
+            ak(idx2) = im
           }
-        })
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(classOf[DoubleFFT_1D].getName).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
     }
     else {
       for (i <- 0 until n) {

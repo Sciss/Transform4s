@@ -27,15 +27,11 @@
 
 package de.sciss.transform4s.utils
 
-import java.util.concurrent.Callable
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.Future
-import java.util.concurrent.ThreadFactory
-import java.util.concurrent.TimeUnit
+import java.lang.Math.max
+import java.util.concurrent.{Executors, ThreadFactory}
 
-import Math.max
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 /**
  * Concurrency utilities.
@@ -44,13 +40,15 @@ import Math.max
  * @author Piotr Wendykier (p.wendykier@icm.edu.pl)
  */
 object ConcurrencyUtils {
-  /**
-   * Thread pool.
-   */
-  private val DEFAULT_THREAD_POOL = Executors.newCachedThreadPool(new ConcurrencyUtils.CustomThreadFactory(new ConcurrencyUtils.CustomExceptionHandler))
-  private var threadPool          = DEFAULT_THREAD_POOL
-  private var nthreads            = getNumberOfProcessors
-  private var concurrentThreshold = 100000L
+  private val DEFAULT_THREAD_POOL = Executors.newCachedThreadPool(
+    new ConcurrencyUtils.CustomThreadFactory(new ConcurrencyUtils.CustomExceptionHandler))
+
+  private var _executionContext: ExecutionContext /*Executor*/ =
+    ExecutionContext.fromExecutor(DEFAULT_THREAD_POOL)
+
+  private var nThreads: Int = numProcessors
+
+  private var _concurrentThreshold: Long = 100000L
 
   private class CustomExceptionHandler extends Thread.UncaughtExceptionHandler {
     override def uncaughtException(t: Thread, e: Throwable): Unit = {
@@ -76,17 +74,16 @@ object ConcurrencyUtils {
    *
    * @return the minimum length of array for which multiple threads are used
    */
-  def getConcurrentThreshold: Long = ConcurrencyUtils.concurrentThreshold
+  def concurrentThreshold: Long = _concurrentThreshold
 
   /**
    * Sets the minimum length of an array for which multiple threads are used.
    * <p>
    *
-   * @param concurrentThreshold minimum length of an array for which multiple threads are used
+   * @param value minimum length of an array for which multiple threads are used
    */
-  def setConcurrentThreshold(concurrentThreshold: Long): Unit = {
-    ConcurrencyUtils.concurrentThreshold = max(1, concurrentThreshold)
-  }
+  def concurrentThreshold_=(value: Long): Unit =
+    _concurrentThreshold = max(1, value)
 
   /**
    * Returns the number of available processors.
@@ -94,7 +91,7 @@ object ConcurrencyUtils {
    *
    * @return number of available processors
    */
-  def getNumberOfProcessors: Int = Runtime.getRuntime.availableProcessors
+  def numProcessors: Int = Runtime.getRuntime.availableProcessors
 
   /**
    * Returns the current number of threads.
@@ -102,7 +99,7 @@ object ConcurrencyUtils {
    *
    * @return the current number of threads.
    */
-  def getNumberOfThreads: Int = ConcurrencyUtils.nthreads
+  def numThreads: Int = nThreads
 
   /**
    * Sets the number of threads.
@@ -110,38 +107,34 @@ object ConcurrencyUtils {
    *
    * @param n new value of threads
    */
-  def setNumberOfThreads(n: Int): Unit =
-    ConcurrencyUtils.nthreads = n
+  def numThreads_=(n: Int): Unit =
+    nThreads = n
 
-  /**
-   * Submits a value-returning task for execution and returns a Future
-   * representing the pending results of the task.
-   * <p>
-   *
-   * @tparam T  type
-   * @param task task for execution
-   *             <p>
-   * @return handle to the task submitted for execution
-   */
-  def submit[T](task: Callable[T]): Future[T] = {
-    if (ConcurrencyUtils.threadPool.isShutdown || ConcurrencyUtils.threadPool.isTerminated) {
-      ConcurrencyUtils.threadPool = DEFAULT_THREAD_POOL
-    }
-    ConcurrencyUtils.threadPool.submit(task)
-  }
+//  /**
+//   * Submits a value-returning task for execution and returns a Future
+//   * representing the pending results of the task.
+//   * <p>
+//   *
+//   * @tparam A  type
+//   * @param task task for execution
+//   *             <p>
+//   * @return handle to the task submitted for execution
+//   */
+//  def submit[A](task: => A): Future[A] =
+//    Future(task)(_executionContext)
 
-  /**
-   * Submits a Runnable task for execution and returns a Future representing that task.
-   * <p>
-   *
-   * @param task task for execution
-   *             <p>
-   * @return handle to the task submitted for execution
-   */
-  def submit(task: Runnable): Future[_] = {
-    if (ConcurrencyUtils.threadPool.isShutdown || ConcurrencyUtils.threadPool.isTerminated) ConcurrencyUtils.threadPool = DEFAULT_THREAD_POOL
-    ConcurrencyUtils.threadPool.submit(task)
-  }
+
+//  /**
+//   * Submits a Runnable task for execution and returns a Future representing that task.
+//   * <p>
+//   *
+//   * @param task task for execution
+//   *             <p>
+//   * @return handle to the task submitted for execution
+//   */
+//  def submit(task: Runnable): Future[_] = {
+//    ConcurrencyUtils.executionContext.execute(task)
+//  }
 
   /**
    * Waits for all threads to complete computation.
@@ -152,12 +145,11 @@ object ConcurrencyUtils {
    * @throws ExecutionException   if the computation threw an exception
    * @throws InterruptedException if the current thread was interrupted while waiting
    */
-  @throws[InterruptedException]
-  @throws[ExecutionException]
   def waitForCompletion(futures: Array[Future[_]]): Unit = {
-    val size = futures.length
-    for (j <- 0 until size) {
-      futures(j).get
+    var i = 0
+    while (i < futures.length) {
+      Await.result(futures(i), Duration.Inf)
+      i += 1
     }
   }
 
@@ -165,11 +157,10 @@ object ConcurrencyUtils {
    * Sets the pool of threads.
    * <p>
    *
-   * @param threadPool pool of threads
+   * @param ec pool of threads
    */
-  def setThreadPool(threadPool: ExecutorService): Unit = {
-    ConcurrencyUtils.threadPool = threadPool
-  }
+  def executionContext_=(ec: ExecutionContext): Unit =
+    _executionContext = ec
 
   /**
    * Returns the pool of threads.
@@ -177,27 +168,27 @@ object ConcurrencyUtils {
    *
    * @return pool of threads
    */
-  def getThreadPool: ExecutorService = ConcurrencyUtils.threadPool
+  implicit def executionContext: ExecutionContext = _executionContext
 
-  /**
-   * Shutdowns all submitted tasks.
-   */
-  def shutdownThreadPoolAndAwaitTermination(): Unit = {
-    ConcurrencyUtils.threadPool.shutdown() // Disable new tasks from being submitted
-
-    try // Wait a while for existing tasks to terminate
-      if (!ConcurrencyUtils.threadPool.awaitTermination(60, TimeUnit.SECONDS)) {
-        ConcurrencyUtils.threadPool.shutdownNow // Cancel currently executing tasks
-
-        // Wait a while for tasks to respond to being cancelled
-        if (!ConcurrencyUtils.threadPool.awaitTermination(60, TimeUnit.SECONDS)) System.err.println("Pool did not terminate")
-      }
-    catch {
-      case _: InterruptedException =>
-        // (Re-)Cancel if current thread also interrupted
-        ConcurrencyUtils.threadPool.shutdownNow
-        // Preserve interrupt status
-        Thread.currentThread.interrupt()
-    }
-  }
+//  /**
+//   * Shutdowns all submitted tasks.
+//   */
+//  def shutdownThreadPoolAndAwaitTermination(): Unit = {
+//    ConcurrencyUtils._executionContext.shutdown() // Disable new tasks from being submitted
+//
+//    try // Wait a while for existing tasks to terminate
+//      if (!ConcurrencyUtils._executionContext.awaitTermination(60, TimeUnit.SECONDS)) {
+//        ConcurrencyUtils._executionContext.shutdownNow // Cancel currently executing tasks
+//
+//        // Wait a while for tasks to respond to being cancelled
+//        if (!ConcurrencyUtils._executionContext.awaitTermination(60, TimeUnit.SECONDS)) System.err.println("Pool did not terminate")
+//      }
+//    catch {
+//      case _: InterruptedException =>
+//        // (Re-)Cancel if current thread also interrupted
+//        ConcurrencyUtils._executionContext.shutdownNow
+//        // Preserve interrupt status
+//        Thread.currentThread.interrupt()
+//    }
+//  }
 }

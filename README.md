@@ -10,6 +10,15 @@ of the [JTransforms](https://github.com/wendykierp/JTransforms) library (C)opyri
 All adaptations and Scala translation (C)opyright 2020 by Hanns Holger Ruz. This project is released
 under the GNU Lesser General Public License v2.1+.
 
+__Why?__ Because I need a library that can compile both the JVM and JS. In the future, compiling to
+Scala Native might also be useful.
+
+__What?__
+
+- Removed all dependencies on other Java libraries (e.g. Apache Commons FastMath, at least for now)
+- Removed API unsupported by Scala.js (e.g. Java Logging)
+- Removed the Large Array support (not needed in my case,  another Java dependency).
+
 ## building
 
 This project builds with sbt against Scala 2.13, 2.12, Dotty (JVM) and 2.13 (Scala.js).

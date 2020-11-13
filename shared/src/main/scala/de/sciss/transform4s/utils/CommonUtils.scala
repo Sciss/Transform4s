@@ -27,11 +27,9 @@
 
 package de.sciss.transform4s.utils
 
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.Future
-import java.util.logging.Level
-import java.util.logging.Logger
+import scala.concurrent.Future
 //import org.apache.commons.math3.util.FastMath._
+import ConcurrencyUtils.executionContext
 
 import Math.{floor, cos, sin, log, pow}
 
@@ -41,10 +39,10 @@ import Math.{floor, cos, sin, log, pow}
  * @author Piotr Wendykier (piotr.wendykier@gmail.com)
  */
 object CommonUtils {
-  private var THREADS_BEGIN_N_1D_FFT_2THREADS = 8192L
-  private var THREADS_BEGIN_N_1D_FFT_4THREADS = 65536L
-  private var THREADS_BEGIN_N_2D              = 65536L
-  private var THREADS_BEGIN_N_3D              = 65536L
+  private var THREADS_BEGIN_N_1D_FFT_2THREADS: Int = 8192
+  private var THREADS_BEGIN_N_1D_FFT_4THREADS: Int = 65536
+  private var THREADS_BEGIN_N_2D             : Int = 65536
+  private var THREADS_BEGIN_N_3D             : Int = 65536
 
   /**
    * Causes the currently executing thread to sleep (temporarily cease
@@ -65,35 +63,35 @@ object CommonUtils {
    *
    * @return the minimal size of 1D data for which two threads are used
    */
-  def getThreadsBeginN_1D_FFT_2Threads: Long = THREADS_BEGIN_N_1D_FFT_2THREADS
+  def threadsBeginN_1D_FFT_2Threads: Int = THREADS_BEGIN_N_1D_FFT_2THREADS
 
   /**
    * Returns the minimal size of 1D data for which four threads are used.
    *
    * @return the minimal size of 1D data for which four threads are used
    */
-  def getThreadsBeginN_1D_FFT_4Threads: Long = THREADS_BEGIN_N_1D_FFT_4THREADS
+  def threadsBeginN_1D_FFT_4Threads: Int = THREADS_BEGIN_N_1D_FFT_4THREADS
 
   /**
    * Returns the minimal size of 2D data for which threads are used.
    *
    * @return the minimal size of 2D data for which threads are used
    */
-  def getThreadsBeginN_2D: Long = THREADS_BEGIN_N_2D
+  def threadsBeginN_2D: Int = THREADS_BEGIN_N_2D
 
   /**
    * Returns the minimal size of 3D data for which threads are used.
    *
    * @return the minimal size of 3D data for which threads are used
    */
-  def getThreadsBeginN_3D: Long = THREADS_BEGIN_N_3D
+  def threadsBeginN_3D: Int = THREADS_BEGIN_N_3D
 
   /**
    * Sets the minimal size of 1D data for which two threads are used.
    *
    * @param n the minimal size of 1D data for which two threads are used
    */
-  def setThreadsBeginN_1D_FFT_2Threads(n: Long): Unit =
+  def threadsBeginN_1D_FFT_2Threads_=(n: Int): Unit =
     if (n < 1024) THREADS_BEGIN_N_1D_FFT_2THREADS = 1024
     else          THREADS_BEGIN_N_1D_FFT_2THREADS = n
 
@@ -102,7 +100,7 @@ object CommonUtils {
    *
    * @param n the minimal size of 1D data for which four threads are used
    */
-  def setThreadsBeginN_1D_FFT_4Threads(n: Long): Unit =
+  def threadsBeginN_1D_FFT_4Threads_=(n: Int): Unit =
     if (n < 1024) THREADS_BEGIN_N_1D_FFT_4THREADS = 1024
     else          THREADS_BEGIN_N_1D_FFT_4THREADS = n
 
@@ -111,7 +109,7 @@ object CommonUtils {
    *
    * @param n the minimal size of 2D data for which threads are used
    */
-  def setThreadsBeginN_2D(n: Long): Unit =
+  def threadsBeginN_2D_=(n: Int): Unit =
     if (n < 4096) THREADS_BEGIN_N_2D = 4096
     else          THREADS_BEGIN_N_2D = n
 
@@ -120,7 +118,7 @@ object CommonUtils {
    *
    * @param n the minimal size of 3D data for which threads are used
    */
-  def setThreadsBeginN_3D(n: Long): Unit =
+  def threadsBeginN_3D_=(n: Int): Unit =
     THREADS_BEGIN_N_3D = n
 
   /**
@@ -473,7 +471,7 @@ object CommonUtils {
   def cftfsub(n: Int, a: Array[Double], offa: Int, ip: Array[Int], nw: Int, w: Array[Double]): Unit = {
     if (n > 8) if (n > 32) {
       cftf1st(n, a, offa, w, nw - (n >> 2))
-      if ((ConcurrencyUtils.getNumberOfThreads > 1) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) cftrec4_th(n, a, offa, nw, w)
+      if ((ConcurrencyUtils.numThreads > 1) && (n >= CommonUtils.threadsBeginN_1D_FFT_2Threads)) cftrec4_th(n, a, offa, nw, w)
       else if (n > 512) cftrec4(n, a, offa, nw, w)
       else if (n > 128) cftleaf(n, 1, a, offa, nw, w)
       else cftfx41(n, a, offa, nw, w)
@@ -494,7 +492,7 @@ object CommonUtils {
   def cftbsub(n: Int, a: Array[Double], offa: Int, ip: Array[Int], nw: Int, w: Array[Double]): Unit = {
     if (n > 8) if (n > 32) {
       cftb1st(n, a, offa, w, nw - (n >> 2))
-      if ((ConcurrencyUtils.getNumberOfThreads > 1) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) cftrec4_th(n, a, offa, nw, w)
+      if ((ConcurrencyUtils.numThreads > 1) && (n >= CommonUtils.threadsBeginN_1D_FFT_2Threads)) cftrec4_th(n, a, offa, nw, w)
       else if (n > 512) cftrec4(n, a, offa, nw, w)
       else if (n > 128) cftleaf(n, 1, a, offa, nw, w)
       else cftfx41(n, a, offa, nw, w)
@@ -2125,15 +2123,15 @@ object CommonUtils {
   }
 
   def cftrec4_th(n: Int, a: Array[Double], offa: Int, nw: Int, w: Array[Double]): Unit = {
-    var i = 0
-    var idiv4 = 0
-    var m = 0
-    var nthreads = 0
-    var idx = 0
-    nthreads = 2
-    idiv4 = 0
+    var i         = 0
+    var idiv4     = 0
+    var m         = 0
+    var nthreads  = 0
+    var idx       = 0
+    nthreads      = 2
+    idiv4         = 0
     m = n >> 1
-    if (n >= CommonUtils.getThreadsBeginN_1D_FFT_4Threads) {
+    if (n >= CommonUtils.threadsBeginN_1D_FFT_4Threads) {
       nthreads = 4
       idiv4 = 1
       m >>= 1
@@ -2141,84 +2139,60 @@ object CommonUtils {
     val futures = new Array[Future[_]](nthreads)
     val mf = m
     i = 0
-    while ( {
-      i < nthreads
-    }) {
+    while (i < nthreads) {
       val firstIdx = offa + i * m
-      if (i != idiv4) futures({
-        idx += 1; idx - 1
-      }) = ConcurrencyUtils.submit(new Runnable() {
-        override def run(): Unit = {
-          var isplt = 0
-          var j = 0
-          var k = 0
-          var m = 0
-          val idx1 = firstIdx + mf
-          m = n
-          while ( {
-            m > 512
-          }) {
-            m >>= 2
-            cftmdl1(m, a, idx1 - m, w, nw - (m >> 1))
-          }
-          cftleaf(m, 1, a, idx1 - m, nw, w)
-          k = 0
-          val idx2 = firstIdx - m
-          j = mf - m
-          while ( {
-            j > 0
-          }) {
-            k += 1
-            isplt = cfttree(m, j, k, a, firstIdx, nw, w)
-            cftleaf(m, isplt, a, idx2 + j, nw, w)
-
-            j -= m
-          }
+      futures(idx) = if (i != idiv4) Future {
+        var isplt = 0
+        var j     = 0
+        var k     = 0
+        var m     = 0
+        val idx1  = firstIdx + mf
+        m = n
+        while (m > 512) {
+          m >>= 2
+          cftmdl1(m, a, idx1 - m, w, nw - (m >> 1))
         }
-      })
-      else futures({
-        idx += 1; idx - 1
-      }) = ConcurrencyUtils.submit(new Runnable() {
-        override def run(): Unit = {
-          var isplt = 0
-          var j = 0
-          var k = 0
-          var m = 0
-          val idx1 = firstIdx + mf
-          k = 1
-          m = n
-          while ( {
-            m > 512
-          }) {
-            m >>= 2
-            k <<= 2
-            cftmdl2(m, a, idx1 - m, w, nw - m)
-          }
-          cftleaf(m, 0, a, idx1 - m, nw, w)
-          k >>= 1
-          val idx2 = firstIdx - m
-          j = mf - m
-          while ( {
-            j > 0
-          }) {
-            k += 1
-            isplt = cfttree(m, j, k, a, firstIdx, nw, w)
-            cftleaf(m, isplt, a, idx2 + j, nw, w)
+        cftleaf(m, 1, a, idx1 - m, nw, w)
+        k = 0
+        val idx2 = firstIdx - m
+        j = mf - m
+        while (j > 0) {
+          k += 1
+          isplt = cfttree(m, j, k, a, firstIdx, nw, w)
+          cftleaf(m, isplt, a, idx2 + j, nw, w)
 
-            j -= m
-          }
+          j -= m
         }
-      })
+      } else Future {
+        var isplt = 0
+        var j     = 0
+        var k     = 0
+        var m     = 0
+        val idx1  = firstIdx + mf
+        k = 1
+        m = n
+        while (m > 512) {
+          m >>= 2
+          k <<= 2
+          cftmdl2(m, a, idx1 - m, w, nw - m)
+        }
+        cftleaf(m, 0, a, idx1 - m, nw, w)
+        k >>= 1
+        val idx2 = firstIdx - m
+        j = mf - m
+        while (j > 0) {
+          k += 1
+          isplt = cfttree(m, j, k, a, firstIdx, nw, w)
+          cftleaf(m, isplt, a, idx2 + j, nw, w)
+
+          j -= m
+        }
+      }
+      idx += 1
 
       i += 1
     }
-    try ConcurrencyUtils.waitForCompletion(futures)
-    catch {
-      case ex: InterruptedException =>
-        Logger.getLogger(name).log(Level.SEVERE, null, ex)
-      case ex: ExecutionException =>
-        Logger.getLogger(name).log(Level.SEVERE, null, ex)
-    }
+    ConcurrencyUtils.waitForCompletion(futures)
   }
 
   private final val name = "CommonUtils"
@@ -3480,7 +3454,7 @@ object CommonUtils {
   def cftfsub(n: Int, a: Array[Float], offa: Int, ip: Array[Int], nw: Int, w: Array[Float]): Unit = {
     if (n > 8) if (n > 32) {
       cftf1st(n, a, offa, w, nw - (n >> 2))
-      if ((ConcurrencyUtils.getNumberOfThreads > 1) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) cftrec4_th(n, a, offa, nw, w)
+      if ((ConcurrencyUtils.numThreads > 1) && (n >= CommonUtils.threadsBeginN_1D_FFT_2Threads)) cftrec4_th(n, a, offa, nw, w)
       else if (n > 512) cftrec4(n, a, offa, nw, w)
       else if (n > 128) cftleaf(n, 1, a, offa, nw, w)
       else cftfx41(n, a, offa, nw, w)
@@ -3501,7 +3475,7 @@ object CommonUtils {
   def cftbsub(n: Int, a: Array[Float], offa: Int, ip: Array[Int], nw: Int, w: Array[Float]): Unit = {
     if (n > 8) if (n > 32) {
       cftb1st(n, a, offa, w, nw - (n >> 2))
-      if ((ConcurrencyUtils.getNumberOfThreads > 1) && (n >= CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) cftrec4_th(n, a, offa, nw, w)
+      if ((ConcurrencyUtils.numThreads > 1) && (n >= CommonUtils.threadsBeginN_1D_FFT_2Threads)) cftrec4_th(n, a, offa, nw, w)
       else if (n > 512) cftrec4(n, a, offa, nw, w)
       else if (n > 128) cftleaf(n, 1, a, offa, nw, w)
       else cftfx41(n, a, offa, nw, w)
@@ -5140,7 +5114,7 @@ object CommonUtils {
     nthreads = 2
     idiv4 = 0
     m = n >> 1
-    if (n >= CommonUtils.getThreadsBeginN_1D_FFT_4Threads) {
+    if (n >= CommonUtils.threadsBeginN_1D_FFT_4Threads) {
       nthreads = 4
       idiv4 = 1
       m >>= 1
@@ -5148,84 +5122,61 @@ object CommonUtils {
     val futures = new Array[Future[_]](nthreads)
     val mf = m
     i = 0
-    while ( {
-      i < nthreads
-    }) {
+    while (i < nthreads) {
       val firstIdx = offa + i * m
-      if (i != idiv4) futures({
-        idx += 1; idx - 1
-      }) = ConcurrencyUtils.submit(new Runnable() {
-        override def run(): Unit = {
-          var isplt = 0
-          var j = 0
-          var k = 0
-          var m = 0
-          val idx1 = firstIdx + mf
-          m = n
-          while ( {
-            m > 512
-          }) {
-            m >>= 2
-            cftmdl1(m, a, idx1 - m, w, nw - (m >> 1))
-          }
-          cftleaf(m, 1, a, idx1 - m, nw, w)
-          k = 0
-          val idx2 = firstIdx - m
-          j = mf - m
-          while ( {
-            j > 0
-          }) {
-            k += 1
-            isplt = cfttree(m, j, k, a, firstIdx, nw, w)
-            cftleaf(m, isplt, a, idx2 + j, nw, w)
-
-            j -= m
-          }
+      futures(idx) = if (i != idiv4) Future {
+        var isplt = 0
+        var j     = 0
+        var k     = 0
+        var m     = 0
+        val idx1  = firstIdx + mf
+        m = n
+        while (m > 512) {
+          m >>= 2
+          cftmdl1(m, a, idx1 - m, w, nw - (m >> 1))
         }
-      })
-      else futures({
-        idx += 1; idx - 1
-      }) = ConcurrencyUtils.submit(new Runnable() {
-        override def run(): Unit = {
-          var isplt = 0
-          var j = 0
-          var k = 0
-          var m = 0
-          val idx1 = firstIdx + mf
-          k = 1
-          m = n
-          while ( {
-            m > 512
-          }) {
-            m >>= 2
-            k <<= 2
-            cftmdl2(m, a, idx1 - m, w, nw - m)
-          }
-          cftleaf(m, 0, a, idx1 - m, nw, w)
-          k >>= 1
-          val idx2 = firstIdx - m
-          j = mf - m
-          while ( {
-            j > 0
-          }) {
-            k += 1
-            isplt = cfttree(m, j, k, a, firstIdx, nw, w)
-            cftleaf(m, isplt, a, idx2 + j, nw, w)
+        cftleaf(m, 1, a, idx1 - m, nw, w)
+        k = 0
+        val idx2 = firstIdx - m
+        j = mf - m
+        while (j > 0) {
+          k += 1
+          isplt = cfttree(m, j, k, a, firstIdx, nw, w)
+          cftleaf(m, isplt, a, idx2 + j, nw, w)
 
-            j -= m
-          }
+          j -= m
         }
-      })
+      }
+      else Future {
+        var isplt = 0
+        var j     = 0
+        var k     = 0
+        var m     = 0
+        val idx1  = firstIdx + mf
+        k = 1
+        m = n
+        while (m > 512) {
+          m >>= 2
+          k <<= 2
+          cftmdl2(m, a, idx1 - m, w, nw - m)
+        }
+        cftleaf(m, 0, a, idx1 - m, nw, w)
+        k >>= 1
+        val idx2 = firstIdx - m
+        j = mf - m
+        while (j > 0) {
+          k += 1
+          isplt = cfttree(m, j, k, a, firstIdx, nw, w)
+          cftleaf(m, isplt, a, idx2 + j, nw, w)
+
+          j -= m
+        }
+      }
+      idx += 1
 
       i += 1
     }
-    try ConcurrencyUtils.waitForCompletion(futures)
-    catch {
-      case ex: InterruptedException =>
-        Logger.getLogger(name).log(Level.SEVERE, null, ex)
-      case ex: ExecutionException =>
-        Logger.getLogger(name).log(Level.SEVERE, null, ex)
-    }
+    ConcurrencyUtils.waitForCompletion(futures)
   }
 
   def cftrec4(n: Int, a: Array[Float], offa: Int, nw: Int, w: Array[Float]): Unit = {
@@ -6483,37 +6434,29 @@ object CommonUtils {
   }
 
   def scale(n: Int, m: Double, a: Array[Double], offa: Int, complex: Boolean): Unit = {
-    var nthreads = ConcurrencyUtils.getNumberOfThreads
+    var nthreads = ConcurrencyUtils.numThreads
     var n2 = 0
     if (complex) n2 = 2 * n
     else n2 = n
-    if ((nthreads > 1) && (n2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+    if ((nthreads > 1) && (n2 > CommonUtils.threadsBeginN_1D_FFT_2Threads)) {
       nthreads = 2
       val k = n2 / nthreads
       val futures = new Array[Future[_]](nthreads)
       for (i <- 0 until nthreads) {
-        val firstIdx = offa + i * k
-        val lastIdx = if (i == (nthreads - 1)) offa + n2
+        val firstIdx  = offa + i * k
+        val lastIdx   = if (i == (nthreads - 1)) offa + n2
         else firstIdx + k
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              a(i) *= m
-            }
+        futures(i) = Future {
+          for (i <- firstIdx until lastIdx) {
+            a(i) *= m
           }
-        })
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(name).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(name).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
     }
     else {
-      val firstIdx = offa
-      val lastIdx = offa + n2
+      val firstIdx  = offa
+      val lastIdx   = offa + n2
       for (i <- firstIdx until lastIdx) {
         a(i) *= m
       }
@@ -6521,37 +6464,29 @@ object CommonUtils {
   }
 
   def scale(n: Int, m: Float, a: Array[Float], offa: Int, complex: Boolean): Unit = {
-    var nthreads = ConcurrencyUtils.getNumberOfThreads
+    var nthreads = ConcurrencyUtils.numThreads
     var n2 = 0
     if (complex) n2 = 2 * n
     else n2 = n
-    if ((nthreads > 1) && (n2 > CommonUtils.getThreadsBeginN_1D_FFT_2Threads)) {
+    if ((nthreads > 1) && (n2 > CommonUtils.threadsBeginN_1D_FFT_2Threads)) {
       nthreads = 2
       val k = n2 / nthreads
       val futures = new Array[Future[_]](nthreads)
       for (i <- 0 until nthreads) {
-        val firstIdx = offa + i * k
-        val lastIdx = if (i == (nthreads - 1)) offa + n2
+        val firstIdx  = offa + i * k
+        val lastIdx   = if (i == (nthreads - 1)) offa + n2
         else firstIdx + k
-        futures(i) = ConcurrencyUtils.submit(new Runnable() {
-          override def run(): Unit = {
-            for (i <- firstIdx until lastIdx) {
-              a(i) *= m
-            }
+        futures(i) = Future {
+          for (i <- firstIdx until lastIdx) {
+            a(i) *= m
           }
-        })
+        }
       }
-      try ConcurrencyUtils.waitForCompletion(futures)
-      catch {
-        case ex: InterruptedException =>
-          Logger.getLogger(name).log(Level.SEVERE, null, ex)
-        case ex: ExecutionException =>
-          Logger.getLogger(name).log(Level.SEVERE, null, ex)
-      }
+      ConcurrencyUtils.waitForCompletion(futures)
     }
     else {
-      val firstIdx = offa
-      val lastIdx = offa + n2
+      val firstIdx  = offa
+      val lastIdx   = offa + n2
       for (i <- firstIdx until lastIdx) {
         a(i) *= m
       }
