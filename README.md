@@ -16,7 +16,8 @@ Scala Native might also be useful.
 __What?__
 
 - Removed all dependencies on other Java libraries (e.g. Apache Commons FastMath, at least for now)
-- Removed API unsupported by Scala.js (e.g. Java Logging)
+- Removed API unsupported by Scala.js (e.g. Java Logging, Java concurrency). On the JVM, you can still
+  run the algorithms multi-threaded if desired.
 - Removed the Large Array support (not needed in my case,  another Java dependency).
 
 ## building
@@ -29,4 +30,15 @@ The following artifact is necessary as dependency:
 
     libraryDependencies += "de.sciss" %% "transform4s" % v
 
-The current version `v` is `"9.1.0"`
+The current version `v` is `"0.1.0"`
+
+## limitations
+
+- Currently, the number of transforms converted to Scala is very low. In the future, more and more of
+  JTransform's classes could be added: `DoubleFFT1_D`, `DoubleFFT2_D`. Credits: The translations are mostly
+  mechanical through IntelliJ IDEA's Java-to-Scala translator, plus a bit of manual clean-up.
+
+- Unit tests have not been converted yet. In other words, no guarantee that the code translation is
+  correct (even though likely due to the mechanical process)
+
+- in the future, we might use `Float64Array` on Scala.js for better performance

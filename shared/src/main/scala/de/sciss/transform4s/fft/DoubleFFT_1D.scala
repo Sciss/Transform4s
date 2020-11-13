@@ -594,7 +594,7 @@ final class DoubleFFT_1D private (
     }
   }
 
-  protected def realInverse2(a: Array[Double], offa: Int, scale: Boolean): Unit = {
+  private[fft] def realInverse2(a: Array[Double], offa: Int, scale: Boolean): Unit = {
     if (n == 1) return
     plan match {
       case SPLIT_RADIX =>

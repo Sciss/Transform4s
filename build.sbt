@@ -1,13 +1,15 @@
 lazy val baseName  = "Transform4s"
 lazy val baseNameL = baseName.toLowerCase
 
-lazy val projectVersion = "0.1.0-SNAPSHOT"
+lazy val projectVersion = "0.1.0"
 lazy val mimaVersion    = "0.1.0"
 
 lazy val commonJvmSettings = Seq(
   crossScalaVersions := Seq("3.0.0-M1", "2.13.3", "2.12.12"),
 )
 
+// When you want to edit the Java sources in the IDE.
+// Disable for publishing!
 val ENABLE_JAVA = false
 
 lazy val root = crossProject(JSPlatform, JVMPlatform).in(file("."))
@@ -78,7 +80,7 @@ lazy val publishSettings = Seq(
   <developer>
     <id>sciss</id>
     <name>Hanns Holger Rutz</name>
-    <url>http://www.sciss.de</url>
+    <url>https://www.sciss.de</url>
   </developer>
 </developers>
   }
