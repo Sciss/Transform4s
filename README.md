@@ -30,7 +30,7 @@ The following artifact is necessary as dependency:
 
     libraryDependencies += "de.sciss" %% "transform4s" % v
 
-The current version `v` is `"0.1.0"`
+The current version `v` is `"0.1.1"`
 
 ## limitations
 

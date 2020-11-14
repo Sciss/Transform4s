@@ -677,8 +677,8 @@ final class DoubleFFT_1D private (
 
     j = 0
     // factorize_loop
-    var _continue_factorize_loop = false
     while ({
+      var _continue_factorize_loop = false
       j += 1
       if (j <= 4) {
         ntry = factors(j - 1)
@@ -793,8 +793,8 @@ final class DoubleFFT_1D private (
 
     j = 0
     // factorize_loop
-    var _continue_factorize_loop = false
     while ({
+      var _continue_factorize_loop = false
       j += 1
       if (j <= 4) {
         ntry = factors(j - 1)
@@ -908,8 +908,8 @@ final class DoubleFFT_1D private (
 
     j = 0
     // factorize_loop
-    var _continue_factorize_loop = false
     while ({
+      var _continue_factorize_loop = false
       j += 1
       if (j <= 4) {
         ntry = factors(j - 1)
