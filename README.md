@@ -1,13 +1,13 @@
 # Transform4s
 
-[![Build Status](https://travis-ci.org/Sciss/Transform4s.svg?branch=main)](https://travis-ci.org/Sciss/Transform4s)
+[![Build Status](https://github.com/Sciss/Transform4s/workflows/Scala%20CI/badge.svg?branch=main)](https://github.com/Sciss/Transform4s/actions?query=workflow%3A%22Scala+CI%22)
 [![Maven Central](https://maven-badges.herokuapp.com/maven-central/de.sciss/transform4s_2.13/badge.svg)](https://maven-badges.herokuapp.com/maven-central/de.sciss/transform4s_2.13)
 
 ## statement
 
 This is a library for FFT based transformations. It is a direct translation from Java to Scala of parts
 of the [JTransforms](https://github.com/wendykierp/JTransforms) library (C)opyright by Piotr Wendykier. 
-All adaptations and Scala translation (C)opyright 2020 by Hanns Holger Ruz. This project is released
+All adaptations and Scala translation (C)opyright 2020–2021 by Hanns Holger Ruz. This project is released
 under the GNU Lesser General Public License v2.1+.
 
 __Why?__ Because I need a library that can compile both the JVM and JS. In the future, compiling to
